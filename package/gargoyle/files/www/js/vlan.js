@@ -706,11 +706,25 @@ function saveChanges()
 			// OTHER LAN-side zone is entirely the access matrix's call (built
 			// below as separate `forwarding` sections) -- deny is simply the
 			// absence of one, matching how the default lan/wan stanzas work.
+			//
+			// input MUST be ACCEPT, matching the default `lan` zone (never
+			// REJECT) -- `input` governs traffic addressed to the router
+			// ITSELF from this zone, and DHCP/DNS requests are addressed to
+			// the router. REJECT here doesn't just block admin-UI access to
+			// the VLAN's own gateway (arguably a defensible default); it
+			// silently breaks the VLAN's own DHCP server, since a client's
+			// DHCPDISCOVER never reaches dnsmasq at all -- confirmed live via
+			// vnet phase 28 (T-VLAN-02/06/07 all failed on a REJECT-input
+			// zone; a real `busybox udhcpc` got zero offers). Inter-VLAN
+			// isolation is what `forward` (REJECT here, absence of a matrix
+			// entry) and the access matrix are for; `input` isolating the
+			// VLAN from the router's own basic services isn't isolation,
+			// it's just breakage.
 			uci.set('firewall', 'zone_' + ifaceName, '', 'zone');
 			uci.set('firewall', 'zone_' + ifaceName, 'name', ifaceName);
 			uci.createListOption('firewall', 'zone_' + ifaceName, 'network', true);
 			uci.set('firewall', 'zone_' + ifaceName, 'network', [ifaceName]);
-			uci.set('firewall', 'zone_' + ifaceName, 'input', 'REJECT');
+			uci.set('firewall', 'zone_' + ifaceName, 'input', 'ACCEPT');
 			uci.set('firewall', 'zone_' + ifaceName, 'output', 'ACCEPT');
 			uci.set('firewall', 'zone_' + ifaceName, 'forward', 'REJECT');
 			uci.set('firewall', 'fwd_' + ifaceName + '_wan', '', 'forwarding');
