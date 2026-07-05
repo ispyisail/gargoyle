@@ -55,7 +55,20 @@ print_mac80211_capabs_for_wifi_dev()
 			# however, as far as I can tell there is no other way to get max txpower for each channel
 			# so... here it goes.
 			# If stuff gets FUBAR, take a look at iw output, and see if this god-awful expression still works
-			iw "$phyname" info 2>&1 | sed -e '/MHz/!d; /GI/d; /disabled/d; /radar detect /d; /Supported Channel Width/d; /STBC/d; /PPDU/d; /MCS/d; s/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' | grep 'MHz' | awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
+			#
+			# See the identical fix (and its full rationale) in
+			# print_mac80211_channels_for_wifi_dev below -- a substring
+			# blacklist ("MHz" present, minus GI/STBC/MCS/etc.) lets modern
+			# HE/EHT capability-description lines that happen to also say
+			# "MHz" in running text through, producing garbage. Matched to
+			# the actual channel-line shape ("* <freq> MHz [<channel>]
+			# (<power> dBm)") instead, which no capability-description line
+			# happens to also start with.
+			iw "$phyname" info 2>&1 \
+				| grep -E '^[[:space:]]*\*[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+\[[0-9]+\]' \
+				| grep -v disabled \
+				| sed -e 's/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' \
+				| awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
 
 			echo "phyCapab[\"$phyname\"][\"$b\"][\"channels\"] = nextCh ;"     >> "$out"
 			echo "phyCapab[\"$phyname\"][\"$b\"][\"freqs\"]  = nextChFreq ;" >> "$out"
@@ -161,7 +174,31 @@ print_mac80211_channels_for_wifi_dev()
 	# however, as far as I can tell there is no other way to get max txpower for each channel
 	# so... here it goes.
 	# If stuff gets FUBAR, take a look at iw output, and see if this god-awful expression still works
-	iw "$phyname" info 2>&1 | sed -e '/MHz/!d; /GI/d; /disabled/d; /radar detect /d; /Supported Channel Width/d; /STBC/d; /PPDU/d; /MCS/d; s/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' | grep 'MHz' | awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
+	#
+	# This used to be a blacklist of substrings to exclude (GI, STBC, MCS,
+	# PPDU, ...) from a bare `grep MHz`, on the assumption that anything
+	# left over was a channel line. That held for basic 802.11n/ac output,
+	# but modern HE/EHT-capable radios (mac80211_hwsim's default phys
+	# advertise the full modern capability set) add many more capability
+	# description lines that also mention "MHz" in running text -- e.g.
+	# "242-tone RU in BW wider than 20MHz Supported" or "Support For 20MHz
+	# Rx NDP With Wider Bandwidth" -- which don't match ANY of the
+	# blacklisted substrings, so they survived the filter and got fed to
+	# the same positional awk parse as real channel lines, producing
+	# garbage ("nextCh.push(in); nextChFreq[in] = ...; nextChPwr[in] =
+	# BW;"). Confirmed live via a real hwsim phy.
+	#
+	# Fixed to a whitelist instead: a real channel line has one
+	# unmistakable shape regardless of 802.11 generation --
+	# "* <freq>[.0] MHz [<channel>] (<power> dBm)", optionally followed by
+	# "(no IR)"/"(disabled)"/etc. Matching that shape directly is immune to
+	# whatever new capability-description text future standards add, since
+	# none of it will happen to also start with "* <number> MHz [<number>]".
+	iw "$phyname" info 2>&1 \
+		| grep -E '^[[:space:]]*\*[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+\[[0-9]+\]' \
+		| grep -v disabled \
+		| sed -e 's/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' \
+		| awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
 
 	echo "mac80211Channels[\"$chId\"] = nextCh ;"     >> "$out"
 	echo "mac80211ChFreqs[\"$chId\"]  = nextChFreq ;" >> "$out"
