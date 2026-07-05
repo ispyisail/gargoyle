@@ -219,16 +219,30 @@ if [ -e /lib/wifi/broadcom.sh ] ; then
 	echo "var AwifiAC = false;" >> "$out_file"
 	echo "var AwifiAX = false;" >> "$out_file"
 	echo "var dualBandWireless=false;" >> "$out_file"
-elif [ -e /lib/wifi/mac80211.uc ] && [ -e "/sys/class/ieee80211/phy0" -o -e "/sys/class/ieee80211/wl0" ] ; then
+# Checks for the presence of ANY phy, not a hardcoded phy0/wl0 -- mac80211's
+# kernel phy numbering is only ever guaranteed stable at a fresh boot; it is
+# not guaranteed to start at 0 (e.g. mac80211_hwsim's phy index increases
+# monotonically for the whole boot session and never resets on module
+# reload, confirmed live via repeated vnet wifi test runs). The per-radio
+# helpers below already resolve each radio's actual phy name via `iwinfo
+# nl80211 phyname <uci-device>` first, falling back to phy$dev_num only if
+# that fails -- this top-level gate just needs to know wireless hardware
+# exists at all, not which specific index it landed on.
+elif [ -e /lib/wifi/mac80211.uc ] && [ -n "$(ls /sys/class/ieee80211/ 2>/dev/null)" ] ; then
 	echo 'var wirelessDriver="mac80211";' >> "$out_file"
 	echo 'var mac80211Channels = [];' >> "$out_file"
 	echo 'var mac80211ChFreqs = [];' >> "$out_file"
 	echo 'var mac80211ChPwrs = [];' >> "$out_file"
 
 	echo "var nextCh=[];" >> "$out_file"
-	
+
 	#test for dual band
-	if [ "$(uci show wireless | grep wifi-device | wc -l)" = "2" ] && [ -e "/sys/class/ieee80211/phy1" -o -e "/sys/class/ieee80211/wl1" ] && [ ! "$(uci get wireless.@wifi-device[0].band)" = "$(uci get wireless.@wifi-device[1].band)"  ] ; then
+	# The extra "-e phy1 -o -e wl1" check this used to have is redundant
+	# with (and, given non-zero-based phy numbering, sometimes wrong
+	# alongside) the two checks already here: exactly 2 configured
+	# wifi-device sections with two different bands already IS dual-band,
+	# regardless of which literal phy indices they ended up on.
+	if [ "$(uci show wireless | grep wifi-device | wc -l)" = "2" ] && [ ! "$(uci get wireless.@wifi-device[0].band)" = "$(uci get wireless.@wifi-device[1].band)"  ] ; then
 		echo "var dualBandWireless=true;" >> "$out_file"
 		dualband='true'
 	else
