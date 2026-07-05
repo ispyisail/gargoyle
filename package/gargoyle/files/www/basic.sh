@@ -621,11 +621,22 @@ var isb43 = wirelessDriver == "mac80211" && (!GwifiN) ? true : false ;
 					</div>
 
 					<div id="wan_vlan_container" class="row form-group">
-						<span class="col-xs-5">
-							<input type="checkbox" id="wan_use_vlan" onclick="enableAssociatedField(this, 'wan_vlan', '10')"/>
-							<label class="short-left-pad" for="wan_use_vlan" id="wan_vlan_label"><%~ CustVLAN %>:</label>
-						</span>
-						<span class="col-xs-7"><input type="text" name="wan_vlan" id="wan_vlan" class="form-control" oninput="proofreadNumeric(this)" size="20" maxlength="4"/></span>
+						<div id="wan_vlan_legacy_block">
+							<span class="col-xs-5">
+								<input type="checkbox" id="wan_use_vlan" onclick="enableAssociatedField(this, 'wan_vlan', '10')"/>
+								<label class="short-left-pad" for="wan_use_vlan" id="wan_vlan_label"><%~ CustVLAN %>:</label>
+							</span>
+							<span class="col-xs-7"><input type="text" name="wan_vlan" id="wan_vlan" class="form-control" oninput="proofreadNumeric(this)" size="20" maxlength="4"/></span>
+						</div>
+						<div id="wan_vlan_table_block" class="col-xs-12" style="display:none">
+							<label id="wan_vlan_table_label"><%~ CustVLAN %>:</label>
+							<div id="wan_vlan_table_container" class="table-responsive"></div>
+							<div class="row form-group">
+								<span class="col-xs-3"><input type="text" id="add_wan_vlan_id" class="form-control" oninput="proofreadNumeric(this)" placeholder="<%~ VlanIdCol %>" size="6" maxlength="4"/></span>
+								<span class="col-xs-6"><input type="text" id="add_wan_vlan_desc" class="form-control" placeholder="<%~ VlanDescCol %>"/></span>
+								<span class="col-xs-3"><button type="button" class="btn btn-default btn-add" onclick="addWanVlan()"><%~ Add %></button></span>
+							</div>
+						</div>
 					</div>
 
 					<div id="wan_ping_container" class="row form-group">
@@ -1231,6 +1242,13 @@ var isb43 = wirelessDriver == "mac80211" && (!GwifiN) ? true : false ;
 								<option value="disabled"><%~ Disabled %></option>
 								<option value="enabled"><%~ Enabled %></option>
 							</select>
+						</span>
+					</div>
+
+					<div id="wifi_guest_vlan_container" class="row indent">
+						<label class="col-xs-5" id="wifi_guest_vlan_label" for="wifi_guest_vlan"><%~ GNetVlan %>:</label>
+						<span class="col-xs-7">
+							<select id="wifi_guest_vlan" class="form-control"></select>
 						</span>
 					</div>
 

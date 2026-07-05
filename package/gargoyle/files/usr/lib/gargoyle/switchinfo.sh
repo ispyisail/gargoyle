@@ -13,6 +13,31 @@
 . /usr/lib/gargoyle/ethportinfo.sh
 
 # ports.push(["LAN#","STATUS"]);
+# On DSA hardware, a third element is appended: a space-separated VLAN
+# membership string like "u1 t20 t30" (VLAN 1 untagged/native, VLANs 20 and
+# 30 tagged), read by vlan.js's parsePortAssignmentsFromUci(). Scans every
+# network.<sec>=bridge-vlan section's `ports` list for this exact port name,
+# classifying by suffix: no suffix or ":u"/":*" -> untagged (native); ":t"
+# (or ":t*") -> tagged. Only the presence of "t" in the suffix distinguishes
+# the two -- confirmed against netifd's own bridge-vlan port-list parser.
+get_vlan_membership()
+{
+	portname="$1"
+	uci show network 2>/dev/null | grep '=bridge-vlan' | cut -d= -f1 | cut -d. -f2 | while read -r sec ; do
+		vid=$(uci -q get network.${sec}.vlan)
+		[ -n "$vid" ] || continue
+		for p in $(uci -q get network.${sec}.ports 2>/dev/null) ; do
+			pname="${p%%:*}"
+			suffix="${p#$pname}"
+			if [ "$pname" = "$portname" ] ; then
+				case "$suffix" in
+					*t*) echo "t${vid}" ;;
+					*)   echo "u${vid}" ;;
+				esac
+			fi
+		done
+	done
+}
 
 json_load_file "/etc/board.json"
 json_get_keys BOARDKEYS
@@ -39,7 +64,8 @@ if [ -n "$PORTSTEST" ]; then
 				for PORT in $PORTS; do
 					json_get_var PORTNAME $PORT
 					STATUS=$(get_status_speed "$PORTNAME")
-					echo "ports.push([\"LAN${PORTNAME:3}\",\"$STATUS\"]);"
+					VLANMEMBERSHIP=$(get_vlan_membership "$PORTNAME" | tr '\n' ' ' | sed 's/ *$//')
+					echo "ports.push([\"LAN${PORTNAME:3}\",\"$STATUS\",\"$VLANMEMBERSHIP\"]);"
 				done
 			json_select ..
 		json_select ..

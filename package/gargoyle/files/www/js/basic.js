@@ -189,11 +189,26 @@ function saveChanges()
 		{
 			var devList = uci.getAllSectionsOfType('network','device');
 			devList.forEach(function(devName) {
-				if(devName.match(/wan_vlan[0-9]+_dev/) !== null)
+				if(devName.match(/^wan_vlan[0-9]+_dev$/) !== null)
 				{
 					preCommands = preCommands + "\nuci -q del network." + devName;
 					uci.removeSection('network',devName);
 					uciCompare.removeSection('network',devName);
+				}
+			});
+			// Additive WAN VLAN rows beyond the first (see saveChanges()'s DSA
+			// branch below) get their own interface + firewall zone, distinct
+			// from the _dev device sections above -- rebuilt fresh from the
+			// table on every save, so tear them all down here first.
+			var ifaceList = uci.getAllSectionsOfType('network','interface');
+			ifaceList.forEach(function(ifaceName) {
+				if(ifaceName.match(/^wan_vlan[0-9]+$/) !== null)
+				{
+					preCommands = preCommands + "\nuci -q del network." + ifaceName;
+					uci.removeSection('network', ifaceName);
+					uciCompare.removeSection('network', ifaceName);
+					uci.removeSection('firewall', 'zone_' + ifaceName);
+					uciCompare.removeSection('firewall', 'zone_' + ifaceName);
 				}
 			});
 		}
@@ -263,12 +278,14 @@ function saveChanges()
 				{
 					uci.set('network', 'wan', 'device', iphif);
 				}
-				else
+				else if(switchSecs.length > 0)
 				{
+					// swconfig hardware: unchanged single-VLAN behavior, driven by
+					// the legacy wan_use_vlan checkbox (wan_vlan_legacy_block).
 					if(byId('wan_use_vlan').checked && byId('wan_vlan_container').style.display != 'none')
 					{
 						var vid = byId('wan_vlan').value;
-						if(switchSecs.length > 0 && switchVLAN == '' && defaultWanIf.indexOf('.') > -1)
+						if(switchVLAN == '' && defaultWanIf.indexOf('.') > -1)
 						{
 							// We have switch config but switch_wan_vlan missing, do nothing
 							// We should never get here
@@ -291,17 +308,56 @@ function saveChanges()
 							uci.set('network', 'wan_' + origdevice + "_" + vid + '_dev', 'name', origdevice + "." + vid);
 							uci.set('network', 'wan_' + origdevice + "_" + vid + '_dev', 'macaddr', defaultWanMac.toLowerCase());
 						}
-						else
-						{
-							//preCommands = preCommands + "\nuci set network.wan_vlan" + vid + "_dev=device\n";
-							uci.set('network','wan_vlan' + vid + '_dev','','device');
-							uci.set('network','wan_vlan' + vid + '_dev','name','wanv.' + vid);
-							uci.set('network','wan_vlan' + vid + '_dev','type','8021q');
-							uci.set('network','wan_vlan' + vid + '_dev','ifname',defaultWanIf);
-							uci.set('network','wan_vlan' + vid + '_dev','vid',vid);
+					}
+					else
+					{
+						uci.set('network', 'wan', 'device', defaultWanIf);
+					}
+				}
+				else
+				{
+					// DSA hardware: multi-row WAN VLAN table (wan_vlan_table_block).
+					// The lowest VLAN id present becomes network.wan itself -- the
+					// N==1 case is exactly today's single-VLAN behavior, not a
+					// special case -- every other row is a strictly additive
+					// interface + firewall zone of its own.
+					var vlanRows = getWanVlanTableRows();
+					if(vlanRows.length > 0)
+					{
+						vlanRows.sort(function(a,b){ return parseInt(a.vid,10) - parseInt(b.vid,10); });
+						vlanRows.forEach(function(row, rowIndex) {
+							var vid = row.vid;
+							var devName = 'wan_vlan' + vid + '_dev';
+							uci.set('network', devName, '', 'device');
+							uci.set('network', devName, 'name', 'wanv.' + vid);
+							uci.set('network', devName, 'type', '8021q');
+							uci.set('network', devName, 'ifname', defaultWanIf);
+							uci.set('network', devName, 'vid', vid);
 
-							uci.set('network','wan','device','wanv.' + vid);
-						}
+							if(rowIndex == 0)
+							{
+								uci.set('network', 'wan', 'device', 'wanv.' + vid);
+								uci.set('network', 'wan', 'gargoyle_desc', row.desc);
+							}
+							else
+							{
+								var ifaceName = 'wan_vlan' + vid;
+								uci.set('network', ifaceName, '', 'interface');
+								uci.set('network', ifaceName, 'device', 'wanv.' + vid);
+								uci.set('network', ifaceName, 'proto', 'dhcp');
+								uci.set('network', ifaceName, 'gargoyle_desc', row.desc);
+
+								uci.set('firewall', 'zone_' + ifaceName, '', 'zone');
+								uci.set('firewall', 'zone_' + ifaceName, 'name', ifaceName);
+								uci.createListOption('firewall', 'zone_' + ifaceName, 'network', true);
+								uci.set('firewall', 'zone_' + ifaceName, 'network', [ifaceName]);
+								uci.set('firewall', 'zone_' + ifaceName, 'input', 'REJECT');
+								uci.set('firewall', 'zone_' + ifaceName, 'output', 'ACCEPT');
+								uci.set('firewall', 'zone_' + ifaceName, 'forward', 'REJECT');
+								uci.set('firewall', 'zone_' + ifaceName, 'masq', '1');
+								uci.set('firewall', 'zone_' + ifaceName, 'mtu_fix', '1');
+							}
+						});
 					}
 					else
 					{
@@ -357,7 +413,7 @@ function saveChanges()
 						uci.set("wireless", apgncfg, "", "wifi-iface");
 						uci.set("wireless", apgncfg, "device", wifiDevG);
 						uci.set('wireless', apgncfg, 'mode', 'ap');
-						uci.set('wireless', apgncfg, 'network', 'lan');
+						uci.set('wireless', apgncfg, 'network', getSelectedValue('wifi_guest_vlan') || 'lan');
 						uci.set('wireless', apgncfg, 'disassoc_low_ack', '0');
 						uci.set('wireless', apgncfg, 'is_guest_network', '1');
 
@@ -418,7 +474,7 @@ function saveChanges()
 						uci.set("wireless", apgnacfg, "", "wifi-iface");
 						uci.set("wireless", apgnacfg, "device", wifiDevA);
 						uci.set('wireless', apgnacfg, 'mode', 'ap');
-						uci.set('wireless', apgnacfg, 'network', 'lan');
+						uci.set('wireless', apgnacfg, 'network', getSelectedValue('wifi_guest_vlan') || 'lan');
 						uci.set('wireless', apgnacfg, 'disassoc_low_ack', '0');
 						uci.set('wireless', apgnacfg, 'is_guest_network', '1');
 
@@ -1227,21 +1283,36 @@ function saveChanges()
 		commands = preCommands + commands + adjustIpCommands + bridgeEnabledCommands + restartNetworkCommand + regenerateCacheCommand;
 
 		//document.getElementById("output").value = commands;
-		var param = getParameterDefinition("commands", commands)  + "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
-
-		var stateChangeFunction = function(req)
+		var onApplied = function(req)
 		{
-			if(req.readyState == 4)
+			if(oldLanIp == currentLanIp && (!doReboot))
 			{
-				if(oldLanIp == currentLanIp && (!doReboot))
-				{
-					uciOriginal = uci.clone();
-					resetData();
-					setControlsEnabled(true);
-				}
+				uciOriginal = uci.clone();
+				resetData();
+				setControlsEnabled(true);
 			}
 		}
-		runAjax("POST", "utility/run_commands.sh", param, stateChangeFunction);
+
+		// A WAN VLAN table save can misconfigure the WAN link entirely --
+		// route it through the safe-apply watchdog (auto-reverts if this
+		// page, or any confirmation, never comes back) instead of the plain
+		// fire-and-forget run_commands.sh post every other Basic-page save
+		// still uses. Any save that changes WAN VLANs already restarts
+		// networking today, so this adds a rollback to a risk that already
+		// existed, not new risk.
+		if(commands.match(/wan_vlan[0-9]+_dev|zone_wan_vlan/) !== null)
+		{
+			safeApplyRun(commands, {timeout: 45, onApplied: onApplied});
+		}
+		else
+		{
+			var param = getParameterDefinition("commands", commands)  + "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
+			var stateChangeFunction = function(req)
+			{
+				if(req.readyState == 4) { onApplied(req); }
+			}
+			runAjax("POST", "utility/run_commands.sh", param, stateChangeFunction);
+		}
 
 		//if we're rebooting, this tests whether reboot is done, otherwise
 		//it tests if router is up at new ip
@@ -1371,6 +1442,13 @@ function proofreadAll()
 			returnCodes.push(0);
 			var id = inputIds[idIndex];
 			var container = id + "_container";
+			// wan_vlan's real container is wan_vlan_container, but that outer
+			// wrapper is shown/hidden by wan_protocol, not by hardware type --
+			// on DSA hardware the legacy field lives (empty, unused) inside the
+			// hidden wan_vlan_legacy_block sub-container, while wan_vlan_container
+			// itself stays visible. Point the visibility check at the sub-block
+			// directly so this now-vestigial field isn't spuriously validated.
+			if(id == 'wan_vlan') { container = 'wan_vlan_legacy_block'; }
 			visibilityIds.push( container );
 		}
 
@@ -1756,6 +1834,12 @@ function setWifiVisibility()
 
 	var wifiVisibility = wifiVisibilities[ wifiMode ];
 	setVisibility(wifiIds, wifiVisibility);
+
+	// Independent of the wifiIds/wifiVisibilities positional-array system
+	// above (deliberately -- inserting a new position there means updating
+	// every one of its parallel per-mode arrays in lockstep, which is easy
+	// to misalign). Only meaningful once guest wifi itself is on.
+	setVisibility(['wifi_guest_vlan_container'], getSelectedValue('wifi_guest_mode') == 'enabled' ? [1] : [0]);
 
 	if(wifiMode.match(/sta/))
 	{
@@ -2248,10 +2332,18 @@ function resetData()
 	enableAssociatedField(document.getElementById('wan_use_mtu'), 'wan_mtu', 1500);
 
 	// WAN VLAN
-	// If we have swconfig and WAN is part of the switch VLAN, handle differently
+	// If we have swconfig and WAN is part of the switch VLAN, handle differently.
+	// swconfig hardware keeps the original single-VLAN checkbox+field UI/logic
+	// unchanged (wan_vlan_legacy_block); DSA hardware gets the multi-row table
+	// (wan_vlan_table_block) -- exactly one of the two blocks is shown.
 	var switchSecs = uciOriginal.getAllSectionsOfType('network','switch_vlan');
 	var switchVLAN = uciOriginal.get('network','switch_wan_vlan');
-	if(switchSecs.length > 0 && switchVLAN == '' && defaultWanIf.indexOf('.') > -1)
+	var isSwconfigHw = switchSecs.length > 0;
+
+	setVisibility(['wan_vlan_legacy_block'], isSwconfigHw ? [1] : [0]);
+	setVisibility(['wan_vlan_table_block'], isSwconfigHw ? [0] : [1]);
+
+	if(isSwconfigHw && switchVLAN == '' && defaultWanIf.indexOf('.') > -1)
 	{
 		// We have switch config but no wan vlan config and the default WAN device is a VLAN, don't allow the user to configure
 		byId("wan_use_vlan").disabled = true;
@@ -2272,22 +2364,16 @@ function resetData()
 			byId("wan_use_vlan").checked = false;
 		}
 	}
-	else
+	else if(isSwconfigHw)
 	{
 		byId("wan_use_vlan").disabled = false;
-		var devList = uciOriginal.getAllSectionsOfType('network','device');
-		var wanVLANDev = null;
-		devList.forEach(function(devName) {
-			if(devName.match(/wan_vlan[0-9]+_dev/) !== null)
-			{
-				wanVLANDev = devName;
-			}
-		});
-		byId("wan_use_vlan").checked = wanVLANDev !== null;
-		if(wanVLANDev !== null)
-		{
-			byId("wan_vlan").value = uciOriginal.get('network',wanVLANDev,'vid');
-		}
+	}
+	else
+	{
+		// DSA hardware: populate the multi-row table from every wan_vlan<N>_dev
+		// device section -- see saveChanges()'s DSA branch for how these are
+		// (re)created on save.
+		resetWanVlanTable();
 	}
 	enableAssociatedField(document.getElementById('wan_use_vlan'), 'wan_vlan', '10');
 
@@ -2659,6 +2745,11 @@ function resetData()
 	setSelectedValue('wifi_guest_hidden', uciOriginal.get("wireless", apgncfg, "hidden")==1 ? "disabled" : "enabled")
 	setSelectedValue('wifi_guest_isolate', !apgncfg || uciOriginal.get("wireless", apgncfg, "isolate")==1 ? "enabled" : "disabled")
 
+	var guestVlanOptions = getGuestVlanOptions();
+	setAllowableSelections('wifi_guest_vlan', guestVlanOptions.values, guestVlanOptions.names);
+	var currentGuestNetwork = apgncfg ? uciOriginal.get("wireless", apgncfg, "network") : "";
+	setSelectedValue('wifi_guest_vlan', currentGuestNetwork && guestVlanOptions.values.indexOf(currentGuestNetwork) > -1 ? currentGuestNetwork : "lan");
+
 	var initTxPwr = function(sel_id, txt_id, dev, band)
 	{
 		var txpwr = uciOriginal.get("wireless", dev, "txpower");
@@ -2886,6 +2977,106 @@ function validateFtKey(text)
 function proofreadFtKey(input)
 {
 	proofreadText(input, validateFtKey, 0);
+}
+
+// Pure validation, no DOM -- kept standalone (not folded into addWanVlan())
+// so it can be unit tested directly. Returns "ok", or an error reason string
+// matched against basicS.* in addWanVlan()'s alert().
+function validateWanVlanId(vid, existingIds)
+{
+	if(!/^[0-9]+$/.test(vid)) { return "invalid"; }
+	var n = parseInt(vid, 10);
+	if(n < 1 || n > 4094) { return "range"; }
+	if(existingIds.indexOf("" + n) > -1) { return "duplicate"; }
+	return "ok";
+}
+
+// Guest SSID -> VLAN mapping (PR7): enumerates the LAN VLANs the VLAN
+// Manager (vlan.js) has defined, by reading the same network.bridge-vlan
+// sections it writes -- basic.js already has 'network' injected via -i, so
+// this needs no new server-side data, just a lighter-weight read than
+// vlan.js's own parseVlanDefsFromUci() (only the id/name pair is needed
+// here, not subnet/DHCP details).
+function getGuestVlanOptions()
+{
+	var values = ['lan'];
+	var names = [basicS.GNetVlanDefault];
+	var bridgeVlanSecs = uciOriginal.getAllSectionsOfType('network','bridge-vlan');
+	bridgeVlanSecs.forEach(function(sec) {
+		var m = sec.match(/^vlan_([0-9]+)$/);
+		if(m === null || m[1] == '1') { return; } // vlan_1 is the reserved Default LAN, already covered by 'lan'
+		var id = m[1];
+		var desc = uciOriginal.get('network', sec, 'gargoyle_desc');
+		values.push(id);
+		names.push(id + (desc ? " (" + desc + ")" : ""));
+	});
+	return {values: values, names: names};
+}
+
+function getWanVlanTableRows()
+{
+	var container = document.getElementById('wan_vlan_table_container');
+	if(!container || !container.firstChild) { return []; }
+	var data = getTableDataArray(container.firstChild, true, false);
+	return data.map(function(row){ return {vid: row[0], desc: row[1]}; });
+}
+
+function addWanVlan()
+{
+	var idField = document.getElementById('add_wan_vlan_id');
+	var descField = document.getElementById('add_wan_vlan_desc');
+	var vid = idField.value;
+	var desc = descField.value;
+
+	var existingIds = getWanVlanTableRows().map(function(row){ return row.vid; });
+	var result = validateWanVlanId(vid, existingIds);
+	if(result == "invalid" || result == "range")
+	{
+		alert(basicS.VlanIdRangeErr);
+		return;
+	}
+	if(result == "duplicate")
+	{
+		alert(basicS.VlanIdDupErr);
+		return;
+	}
+
+	var container = document.getElementById('wan_vlan_table_container');
+	addTableRow(container.firstChild, [vid, desc], true, false, null, null);
+	idField.value = "";
+	descField.value = "";
+}
+
+// Populates wan_vlan_table_container from every wan_vlan<N>_dev device
+// section in uciOriginal (DSA hardware only -- see resetData()). Whichever
+// row's device backs network.wan itself is not distinguished in the table;
+// that assignment (lowest VLAN id wins) is redone deterministically on every
+// save by saveChanges()'s DSA branch, so it never needs to round-trip here.
+function resetWanVlanTable()
+{
+	var container = document.getElementById('wan_vlan_table_container');
+	if(!container) { return; }
+
+	var devList = uciOriginal.getAllSectionsOfType('network','device');
+	var rows = [];
+	devList.forEach(function(devName) {
+		var m = devName.match(/^wan_vlan([0-9]+)_dev$/);
+		if(m === null) { return; }
+		var vid = m[1];
+		if(uciOriginal.get('network','wan','device') == 'wanv.' + vid)
+		{
+			rows.push([vid, uciOriginal.get('network','wan','gargoyle_desc')]);
+		}
+		else
+		{
+			rows.push([vid, uciOriginal.get('network','wan_vlan' + vid,'gargoyle_desc')]);
+		}
+	});
+	rows.sort(function(a,b){ return parseInt(a[0],10) - parseInt(b[0],10); });
+
+	container.innerHTML = "";
+	var table = createTable([basicS.VlanIdCol, basicS.VlanDescCol], rows, "wan_vlan_table", true, false, null);
+	container.appendChild(table);
 }
 
 function addTextToSingleColumnTable(textId, tableContainerId, validator, preprocessor, validReturn, duplicatesAllowed, columnName)

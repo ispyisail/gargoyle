@@ -1,0 +1,23 @@
+#!/bin/sh /etc/rc.common
+#
+# Boot-time recovery for the safe-apply watchdog (usr/lib/gargoyle/safe_apply.sh).
+#
+# If the router loses power during an unconfirmed VLAN/network change's
+# confirmation window, the live watchdog process (and its /tmp-based
+# confirm/abort markers) don't survive the reboot -- but the persistent
+# pre-change snapshot under /etc/gargoyle/safe_apply/ does, since it lives on
+# the same overlay as /etc/config itself. A snapshot still being present at
+# boot means it was never confirmed, so restore it before network/firewall
+# start, and let the normal boot sequence bring them up on the restored
+# (known-good) config rather than the possibly-broken pending one.
+#
+# START must stay below network's (usually 20) and firewall's (usually
+# 19-22 depending on fw3 vs fw4) so the restore lands before either reads
+# /etc/config/network or /etc/config/firewall.
+START=3
+STOP=99
+
+boot()
+{
+	[ -x /usr/lib/gargoyle/safe_apply.sh ] && /usr/lib/gargoyle/safe_apply.sh boot-recover
+}
