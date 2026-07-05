@@ -635,6 +635,7 @@ function saveChanges()
 		if(uciOriginal.get('network','brlan_dev','vlan_filtering') == '1')
 		{
 			uci.remove('network', 'brlan_dev', 'vlan_filtering');
+			uci.set('network', 'lan', 'device', 'br-lan');
 		}
 	}
 	else
@@ -651,6 +652,19 @@ function saveChanges()
 		uci.set('network', 'vlan_1', 'vlan', '1');
 		uci.createListOption('network', 'vlan_1', 'ports', true);
 		uci.set('network', 'vlan_1', 'ports', vlan1Ports);
+
+		// Once vlan_filtering is on, the bare br-lan device is just the
+		// switch fabric -- it no longer has a "default" VLAN identity of
+		// its own. network.lan (the pre-existing Default LAN interface)
+		// must move onto VLAN 1's own dedicated sub-device, exactly like
+		// every user VLAN gets its own br-lan.<id>, or the router's own
+		// LAN IP stops being reachable entirely even though port-to-port
+		// forwarding between other devices keeps working -- confirmed live
+		// (vnet phase 28): ARP requests for the router's LAN IP visibly
+		// arrived at the guest's NIC but were never replied to until this
+		// was set, while two other devices on the same VLAN could still
+		// reach each other the whole time.
+		uci.set('network', 'lan', 'device', 'br-lan.1');
 
 		vlanDefs.forEach(function(def) {
 			var vsec = 'vlan_' + def.id;
