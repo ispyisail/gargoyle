@@ -21,31 +21,102 @@ function saveChanges()
 		setControlsEnabled(false, true);
 
 		var firewallSectionCommands = [];
-		var redirectSectionTypes = ["redirect", "redirect_disabled", "dmz", "rule", "rule_disabled"];
-		for(typeIndex=0; typeIndex < redirectSectionTypes.length; typeIndex++)
+
+		// Match existing firewall redirect/rule sections to current-table
+		// rows by their actual identity (protocol + port(s) + destination --
+		// the same fields this page's own duplicate-rule checks already
+		// treat as what makes a rule unique) instead of deleting every
+		// section this tab's uciOriginal knows about and rebuilding all of
+		// them fresh by row position. The old approach meant any save from
+		// this page rewrote every rule wholesale from whatever this tab's
+		// own (possibly stale) table showed -- if a second tab had already
+		// saved an edit to a rule this tab never touched, that edit got
+		// silently reverted the moment this tab saved anything at all (the
+		// same corruption class fixed in dhcp.js's saveChanges()). Reusing
+		// a matched section lets uci.getScriptCommands()'s normal per-field
+		// diff emit commands only for fields a tab actually changed.
+		// includeDestInKey: redirect/redirect_disabled rules are unique by
+		// protocol+external-port alone (this page's own duplicate check
+		// never compares dest_ip/dest_port for these -- two forwards can't
+		// share an external port regardless of where they route, so the
+		// destination is the "value", not part of the rule's identity).
+		// rule/rule_disabled (IPv6 "open port") rules are unique by
+		// protocol+dest_port+dest_ip together (this page's own duplicate
+		// check *does* compare all three -- the same port can legitimately
+		// be opened to several different IPv6 hosts at once).
+		function buildRuleIndex(enabledType, disabledType, namePrefix, includeDestInKey)
 		{
-			var sectionType = redirectSectionTypes[typeIndex];
-			var sections = uciOriginal.getAllSectionsOfType("firewall", sectionType);
-			while(sections.length > 0)
+			var byKey = {};
+			var maxIdx = { enabled: -1, disabled: -1 };
+			[[enabledType, true], [disabledType, false]].forEach(function(pair)
 			{
-				var lastSection = sections.pop();
-				if((sectionType == "rule" || sectionType == "rule_disabled") && lastSection.match("^portopen_rule_(en|dis)abled") == null)
+				var secType = pair[0];
+				var isEnabled = pair[1];
+				var secs = uciOriginal.getAllSectionsOfType("firewall", secType);
+				for(var i = 0; i < secs.length; i++)
 				{
-					continue;
+					var secName = secs[i];
+					if(namePrefix != null && secName.indexOf(namePrefix) != 0) { continue; }
+					var proto = uciOriginal.get("firewall", secName, "proto");
+					var srcdport = uciOriginal.get("firewall", secName, "src_dport");
+					var key = (proto||"") + "|" + (srcdport||"");
+					if(includeDestInKey)
+					{
+						var destip = uciOriginal.get("firewall", secName, "dest_ip");
+						var destport = uciOriginal.get("firewall", secName, "dest_port");
+						key = key + "|" + (destip||"") + "|" + (destport||"");
+					}
+					byKey[key] = { name: secName, enabled: isEnabled };
+					var m = secName.match(/_(\d+)$/);
+					if(m != null)
+					{
+						var idx = parseInt(m[1], 10);
+						if(isEnabled) { maxIdx.enabled = Math.max(maxIdx.enabled, idx); }
+						else { maxIdx.disabled = Math.max(maxIdx.disabled, idx); }
+					}
 				}
-				uciOriginal.removeSection("firewall", lastSection);
-				firewallSectionCommands.push("uci del firewall." + lastSection);
-			}
+			});
+			return { byKey: byKey, maxIdx: maxIdx, matched: {} };
 		}
 
+		// Resolve the section to write a row's fields to: reuse an existing
+		// match if the rule's identity AND enabled/disabled state are
+		// unchanged; otherwise allocate a new name (a real toggle or a
+		// genuinely new rule -- both are actions this tab is intentionally
+		// taking on this specific rule, not a stale-data hazard against an
+		// unrelated one).
+		function resolveRuleSection(index, key, wantEnabled, enabledType, disabledType, namePrefix, uci)
+		{
+			var existing = index.byKey[key];
+			if(existing != null && existing.enabled == wantEnabled)
+			{
+				index.matched[existing.name] = true;
+				return existing.name;
+			}
+			if(existing != null)
+			{
+				// same rule, toggled enabled/disabled -- old name goes away
+				index.matched[existing.name] = true;
+				uciOriginal.removeSection("firewall", existing.name);
+				uci.removeSection("firewall", existing.name);
+				firewallSectionCommands.push("uci del firewall." + existing.name);
+			}
+			var slot = wantEnabled ? "enabled" : "disabled";
+			var nextIdx = wantEnabled ? ++index.maxIdx.enabled : ++index.maxIdx.disabled;
+			var newName = namePrefix + slot + "_number_" + nextIdx;
+			uci.set("firewall", newName, "", wantEnabled ? enabledType : disabledType);
+			firewallSectionCommands.push("uci set firewall." + newName + "=" + (wantEnabled ? enabledType : disabledType));
+			return newName;
+		}
+
+		var redirectIndex = buildRuleIndex("redirect", "redirect_disabled", "redirect_", false);
+		var openIndex = buildRuleIndex("rule", "rule_disabled", "portopen_rule_", true);
 
 		var uci = uciOriginal.clone();
 
 
 		var singlePortTable = document.getElementById('portf_table_container').firstChild;
 		var singlePortData= getTableDataArray(singlePortTable, true, false);
-		var enabledIndex = 0;
-		var disabledIndex = 0;
 		for(rowIndex = 0; rowIndex < singlePortData.length; rowIndex++)
 		{
 
@@ -56,9 +127,8 @@ function saveChanges()
 			var protoIndex=0;
 			for(protoIndex=0;protoIndex < protos.length; protoIndex++)
 			{
-				var id = "redirect_" + (enabled ? "enabled" : "disabled") + "_number_" +  (enabled ? enabledIndex : disabledIndex);
-				firewallSectionCommands.push("uci set firewall." + id + "=" + (enabled ? "redirect" : "redirect_disabled"));
-				uci.set("firewall", id, "", (enabled ? "redirect" : "redirect_disabled"));
+				var key = protos[protoIndex] + "|" + rowData[2];
+				var id = resolveRuleSection(redirectIndex, key, enabled, "redirect", "redirect_disabled", "redirect_", uci);
 				uci.set("firewall", id, "name", rowData[0]);
 				uci.set("firewall", id, "src", "wan");
 				uci.set("firewall", id, "dest", "lan");
@@ -67,8 +137,6 @@ function saveChanges()
 				uci.set("firewall", id, "src_dport", rowData[2]);
 				uci.set("firewall", id, "dest_ip", rowData[3]);
 				uci.set("firewall", id, "dest_port", rowData[4]);
-				enabledIndex = enabledIndex + (enabled ? 1 : 0);
-				disabledIndex = disabledIndex + (enabled ? 0 : 1);
 			}
 		}
 
@@ -84,25 +152,26 @@ function saveChanges()
 			var protoIndex=0;
 			for(protoIndex=0;protoIndex < protos.length; protoIndex++)
 			{
-				var id = "redirect_" + (enabled ? "enabled" : "disabled") + "_number_" +  (enabled ? enabledIndex : disabledIndex);
-				firewallSectionCommands.push("uci set firewall." + id + "=" + (enabled ? "redirect" : "redirect_disabled"));
-				uci.set("firewall", id, "", (enabled ? "redirect" : "redirect_disabled"));
+				var srcdport = rowData[2] + "-" + rowData[3];
+				var key = protos[protoIndex] + "|" + srcdport;
+				var id = resolveRuleSection(redirectIndex, key, enabled, "redirect", "redirect_disabled", "redirect_", uci);
 				uci.set("firewall", id, "name", rowData[0]);
 				uci.set("firewall", id, "src", "wan");
 				uci.set("firewall", id, "dest", "lan");
 				uci.set("firewall", id, "family", "ipv4");
 				uci.set("firewall", id, "proto", protos[protoIndex]);
-				uci.set("firewall", id, "src_dport", rowData[2] + "-" + rowData[3]);
-				uci.set("firewall", id, "dest_port", rowData[2] + "-" + rowData[3]);
+				uci.set("firewall", id, "src_dport", srcdport);
+				uci.set("firewall", id, "dest_port", srcdport);
 				uci.set("firewall", id, "dest_ip", rowData[4]);
-
-				enabledIndex = enabledIndex + (enabled ? 1 : 0);
-				disabledIndex = disabledIndex + (enabled ? 0 : 1);
 			}
 		}
 
 
-		//dmz
+		//dmz -- a singleton, not a list, so no multi-tab identity-matching
+		//needed here; just make sure disabling it actually removes the
+		//section now that the old unconditional "delete every firewall
+		//section this tab knows about" loop above is gone.
+		var dmzSections = uciOriginal.getAllSectionsOfType("firewall", "dmz");
 		if(document.getElementById('dmz_enabled').checked )
 		{
 			var id = "dmz";
@@ -111,6 +180,15 @@ function saveChanges()
 			uci.set("firewall", id, "", "dmz");
 			uci.set("firewall", id, "from", "wan");
 			uci.set("firewall", id, "to_ip", document.getElementById('dmz_ip').value);
+		}
+		else
+		{
+			for(var dmzIdx = 0; dmzIdx < dmzSections.length; dmzIdx++)
+			{
+				uciOriginal.removeSection("firewall", dmzSections[dmzIdx]);
+				uci.removeSection("firewall", dmzSections[dmzIdx]);
+				firewallSectionCommands.push("uci del firewall." + dmzSections[dmzIdx]);
+			}
 		}
 
 		firewallSectionCommands.push("uci commit");
@@ -143,8 +221,6 @@ function saveChanges()
 
 		singlePortTable = document.getElementById('porto_table_container').firstChild;
 		singlePortData= getTableDataArray(singlePortTable, true, false);
-		enabledIndex = 0;
-		disabledIndex = 0;
 		for(rowIndex = 0; rowIndex < singlePortData.length; rowIndex++)
 		{
 			var rowData = singlePortData[rowIndex];
@@ -154,9 +230,8 @@ function saveChanges()
 			var protoIndex=0;
 			for(protoIndex=0;protoIndex < protos.length; protoIndex++)
 			{
-				var id = "portopen_rule_" + (enabled ? "enabled" : "disabled") + "_number_" +  (enabled ? enabledIndex : disabledIndex);
-				firewallSectionCommands.push("uci set firewall." + id + "=" + (enabled ? "rule" : "rule_disabled"));
-				uci.set("firewall", id, "", (enabled ? "rule" : "rule_disabled"));
+				var key = protos[protoIndex] + "||" + rowData[2] + "|" + rowData[3];
+				var id = resolveRuleSection(openIndex, key, enabled, "rule", "rule_disabled", "portopen_rule_", uci);
 				uci.set("firewall", id, "name", rowData[0]);
 				uci.set("firewall", id, "src", "wan");
 				uci.set("firewall", id, "dest", "lan");
@@ -165,8 +240,6 @@ function saveChanges()
 				uci.set("firewall", id, "proto", protos[protoIndex]);
 				uci.set("firewall", id, "dest_ip", rowData[2]);
 				uci.set("firewall", id, "dest_port", rowData[3]);
-				enabledIndex = enabledIndex + (enabled ? 1 : 0);
-				disabledIndex = disabledIndex + (enabled ? 0 : 1);
 			}
 		}
 
@@ -181,9 +254,9 @@ function saveChanges()
 			var protoIndex=0;
 			for(protoIndex=0;protoIndex < protos.length; protoIndex++)
 			{
-				var id = "portopen_rule_" + (enabled ? "enabled" : "disabled") + "_number_" +  (enabled ? enabledIndex : disabledIndex);
-				firewallSectionCommands.push("uci set firewall." + id + "=" + (enabled ? "rule" : "rule_disabled"));
-				uci.set("firewall", id, "", (enabled ? "rule" : "rule_disabled"));
+				var destport = rowData[2] + "-" + rowData[3];
+				var key = protos[protoIndex] + "||" + rowData[4] + "|" + destport;
+				var id = resolveRuleSection(openIndex, key, enabled, "rule", "rule_disabled", "portopen_rule_", uci);
 				uci.set("firewall", id, "name", rowData[0]);
 				uci.set("firewall", id, "src", "wan");
 				uci.set("firewall", id, "dest", "lan");
@@ -192,10 +265,25 @@ function saveChanges()
 				uci.set("firewall", id, "proto", protos[protoIndex]);
 				uci.set("firewall", id, "dest_ip", rowData[4]);
 				uci.set("firewall", id, "dest_port", rowData[2] + "-" + rowData[3]);
-				enabledIndex = enabledIndex + (enabled ? 1 : 0);
-				disabledIndex = disabledIndex + (enabled ? 0 : 1);
 			}
 		}
+
+		// Any section either index knew about that no current row still
+		// maps to (by identity) was actually removed by the user in this
+		// tab -- delete only those, not every section wholesale.
+		[redirectIndex, openIndex].forEach(function(index)
+		{
+			Object.keys(index.byKey).forEach(function(key)
+			{
+				var entry = index.byKey[key];
+				if(index.matched[entry.name] == null)
+				{
+					uciOriginal.removeSection("firewall", entry.name);
+					uci.removeSection("firewall", entry.name);
+					firewallSectionCommands.push("uci del firewall." + entry.name);
+				}
+			});
+		});
 
 		commands = firewallSectionCommands.join("\n") + "\n" + uci.getScriptCommands(uciOriginal) + "\n" + upnpStartCommands.join("\n") + "\n" + restartFirewallCommand;
 		var param = getParameterDefinition("commands", commands) + "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
