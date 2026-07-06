@@ -100,6 +100,7 @@ basicS.GNet="Guest Network";
 basicS.GNetID="Guest Network SSID:";
 basicS.GNet24ID="Guest Network 2.4GHz SSID:";
 basicS.GNet5ID="Guest Network 5GHz SSID:";
+basicS.GNetVlan="Assign to VLAN";
 basicS.F24GHzOnly="Enabled (2.4GHz Only)";
 basicS.F5GHzOnly="Enabled (5GHz Only)";
 basicS.Clnt="Client";
@@ -147,4 +148,11 @@ basicS.Mo3gMBIM="USB Modem (MBIM)";
 basicS.Mo3gHiLink="USB Modem (HiLink, RNDIS)";
 basicS.Mo3gIPH="USB Modem (iPhone)";
 basicS.Dfult="Default";
+
+basicS.VlanIdCol="VLAN ID";
+basicS.VlanDescCol="Description";
+basicS.VlanIdRangeErr="ERROR: VLAN ID must be a number between 1 and 4094.";
+basicS.VlanIdDupErr="ERROR: That VLAN ID is already in the table.";
+
+basicS.GNetVlanDefault="Default LAN (same as main network)";
 

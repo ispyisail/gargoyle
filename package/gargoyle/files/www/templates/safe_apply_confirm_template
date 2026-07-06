@@ -1,0 +1,28 @@
+<div class="modal fade" tabindex="-1" role="dialog" id="safe_apply_confirm_modal" aria-hidden="true" aria-labelledby="safe_apply_confirm_modal_title">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 id="safe_apply_confirm_modal_title" class="panel-title"><%~ saS.Title %></h3>
+			</div>
+			<div class="modal-body">
+				<div class="row form-group">
+					<span class="col-xs-12"><%~ saS.Body %></span>
+				</div>
+				<div class="row form-group">
+					<span class="col-xs-12">
+						<%~ saS.RevertIn %> <strong><span id="safe_apply_countdown"></span></strong> <%~ saS.Seconds %>
+					</span>
+				</div>
+				<div class="row form-group" id="safe_apply_reverting" style="display:none">
+					<span class="col-xs-12 text-danger"><%~ saS.Reverting %></span>
+				</div>
+			</div>
+			<div class="modal-footer" id="safe_apply_confirm_modal_button_container">
+				<a href="#" onclick="abortSafeApply(); return false;"><%~ saS.UndoNow %></a>
+				<button type="button" class="btn btn-primary" onclick="confirmSafeApply();"><%~ saS.KeepSettings %></button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<iframe id="safe_apply_test" style="display:none" src=""></iframe>
