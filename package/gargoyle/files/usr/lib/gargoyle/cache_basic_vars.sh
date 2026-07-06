@@ -55,7 +55,20 @@ print_mac80211_capabs_for_wifi_dev()
 			# however, as far as I can tell there is no other way to get max txpower for each channel
 			# so... here it goes.
 			# If stuff gets FUBAR, take a look at iw output, and see if this god-awful expression still works
-			iw "$phyname" info 2>&1 | sed -e '/MHz/!d; /GI/d; /disabled/d; /radar detect /d; /Supported Channel Width/d; /STBC/d; /PPDU/d; /MCS/d; s/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' | grep 'MHz' | awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
+			#
+			# See the identical fix (and its full rationale) in
+			# print_mac80211_channels_for_wifi_dev below -- a substring
+			# blacklist ("MHz" present, minus GI/STBC/MCS/etc.) lets modern
+			# HE/EHT capability-description lines that happen to also say
+			# "MHz" in running text through, producing garbage. Matched to
+			# the actual channel-line shape ("* <freq> MHz [<channel>]
+			# (<power> dBm)") instead, which no capability-description line
+			# happens to also start with.
+			iw "$phyname" info 2>&1 \
+				| grep -E '^[[:space:]]*\*[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+\[[0-9]+\]' \
+				| grep -v disabled \
+				| sed -e 's/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' \
+				| awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
 
 			echo "phyCapab[\"$phyname\"][\"$b\"][\"channels\"] = nextCh ;"     >> "$out"
 			echo "phyCapab[\"$phyname\"][\"$b\"][\"freqs\"]  = nextChFreq ;" >> "$out"
@@ -161,7 +174,31 @@ print_mac80211_channels_for_wifi_dev()
 	# however, as far as I can tell there is no other way to get max txpower for each channel
 	# so... here it goes.
 	# If stuff gets FUBAR, take a look at iw output, and see if this god-awful expression still works
-	iw "$phyname" info 2>&1 | sed -e '/MHz/!d; /GI/d; /disabled/d; /radar detect /d; /Supported Channel Width/d; /STBC/d; /PPDU/d; /MCS/d; s/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' | grep 'MHz' | awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
+	#
+	# This used to be a blacklist of substrings to exclude (GI, STBC, MCS,
+	# PPDU, ...) from a bare `grep MHz`, on the assumption that anything
+	# left over was a channel line. That held for basic 802.11n/ac output,
+	# but modern HE/EHT-capable radios (mac80211_hwsim's default phys
+	# advertise the full modern capability set) add many more capability
+	# description lines that also mention "MHz" in running text -- e.g.
+	# "242-tone RU in BW wider than 20MHz Supported" or "Support For 20MHz
+	# Rx NDP With Wider Bandwidth" -- which don't match ANY of the
+	# blacklisted substrings, so they survived the filter and got fed to
+	# the same positional awk parse as real channel lines, producing
+	# garbage ("nextCh.push(in); nextChFreq[in] = ...; nextChPwr[in] =
+	# BW;"). Confirmed live via a real hwsim phy.
+	#
+	# Fixed to a whitelist instead: a real channel line has one
+	# unmistakable shape regardless of 802.11 generation --
+	# "* <freq>[.0] MHz [<channel>] (<power> dBm)", optionally followed by
+	# "(no IR)"/"(disabled)"/etc. Matching that shape directly is immune to
+	# whatever new capability-description text future standards add, since
+	# none of it will happen to also start with "* <number> MHz [<number>]".
+	iw "$phyname" info 2>&1 \
+		| grep -E '^[[:space:]]*\*[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+\[[0-9]+\]' \
+		| grep -v disabled \
+		| sed -e 's/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' \
+		| awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
 
 	echo "mac80211Channels[\"$chId\"] = nextCh ;"     >> "$out"
 	echo "mac80211ChFreqs[\"$chId\"]  = nextChFreq ;" >> "$out"
@@ -219,16 +256,30 @@ if [ -e /lib/wifi/broadcom.sh ] ; then
 	echo "var AwifiAC = false;" >> "$out_file"
 	echo "var AwifiAX = false;" >> "$out_file"
 	echo "var dualBandWireless=false;" >> "$out_file"
-elif [ -e /lib/wifi/mac80211.uc ] && [ -e "/sys/class/ieee80211/phy0" -o -e "/sys/class/ieee80211/wl0" ] ; then
+# Checks for the presence of ANY phy, not a hardcoded phy0/wl0 -- mac80211's
+# kernel phy numbering is only ever guaranteed stable at a fresh boot; it is
+# not guaranteed to start at 0 (e.g. mac80211_hwsim's phy index increases
+# monotonically for the whole boot session and never resets on module
+# reload, confirmed live via repeated vnet wifi test runs). The per-radio
+# helpers below already resolve each radio's actual phy name via `iwinfo
+# nl80211 phyname <uci-device>` first, falling back to phy$dev_num only if
+# that fails -- this top-level gate just needs to know wireless hardware
+# exists at all, not which specific index it landed on.
+elif [ -e /lib/wifi/mac80211.uc ] && [ -n "$(ls /sys/class/ieee80211/ 2>/dev/null)" ] ; then
 	echo 'var wirelessDriver="mac80211";' >> "$out_file"
 	echo 'var mac80211Channels = [];' >> "$out_file"
 	echo 'var mac80211ChFreqs = [];' >> "$out_file"
 	echo 'var mac80211ChPwrs = [];' >> "$out_file"
 
 	echo "var nextCh=[];" >> "$out_file"
-	
+
 	#test for dual band
-	if [ "$(uci show wireless | grep wifi-device | wc -l)" = "2" ] && [ -e "/sys/class/ieee80211/phy1" -o -e "/sys/class/ieee80211/wl1" ] && [ ! "$(uci get wireless.@wifi-device[0].band)" = "$(uci get wireless.@wifi-device[1].band)"  ] ; then
+	# The extra "-e phy1 -o -e wl1" check this used to have is redundant
+	# with (and, given non-zero-based phy numbering, sometimes wrong
+	# alongside) the two checks already here: exactly 2 configured
+	# wifi-device sections with two different bands already IS dual-band,
+	# regardless of which literal phy indices they ended up on.
+	if [ "$(uci show wireless | grep wifi-device | wc -l)" = "2" ] && [ ! "$(uci get wireless.@wifi-device[0].band)" = "$(uci get wireless.@wifi-device[1].band)"  ] ; then
 		echo "var dualBandWireless=true;" >> "$out_file"
 		dualband='true'
 	else
