@@ -28,17 +28,33 @@ function saveChanges()
 	{
 		setControlsEnabled(false, true);
 
-		//remove all old access points so we can reorder them
 		var apSectionCommands = [];
+
+		// Match existing AP sections to current-table rows by identity
+		// (BSSID if known, else radio+SSID) instead of deleting every
+		// section this tab's uciOriginal knows about and rebuilding all of
+		// them fresh by row position -- the same corruption class fixed in
+		// dhcp.js's saveChanges() (see ispyisail/gargoyle#26). Reusing a
+		// matched section lets uci.getScriptCommands()'s normal per-field
+		// diff emit commands only for fields a tab actually changed, so a
+		// stale tab's save no longer silently reverts another tab's
+		// already-saved edit to an AP entry it never touched.
+		var apByKey = {};
+		var apMaxIdx = 0;
 		var apSections = uciOriginal.getAllSectionsOfType("gargoyle_stamgr", "stacfg");
-		while(apSections.length > 0)
+		for(var apSecIdx = 0; apSecIdx < apSections.length; apSecIdx++)
 		{
-			var lastSection = apSections.pop();
-			uciOriginal.removeSection("gargoyle_stamgr", lastSection);
-			apSectionCommands.push("uci del gargoyle_stamgr." + lastSection);
+			var apSecName = apSections[apSecIdx];
+			var apBssid = uciOriginal.get("gargoyle_stamgr", apSecName, "bssid");
+			var apKey = apBssid ? ("bssid|" + apBssid) : ("radiossid|" + uciOriginal.get("gargoyle_stamgr", apSecName, "radio") + "|" + uciOriginal.get("gargoyle_stamgr", apSecName, "ssid"));
+			apByKey[apKey] = apSecName;
+			var apMatch = apSecName.match(/^stamgr_ap_(\d+)$/);
+			if(apMatch != null) { apMaxIdx = Math.max(apMaxIdx, parseInt(apMatch[1], 10)); }
 		}
+		var apMatched = {};
+
 		var uci = uciOriginal.clone();
-		
+
 		//Set global configs
 		enableStamgr = document.getElementById("enablestamgr").checked;
 		uci.set("gargoyle_stamgr","global","enabled",enableStamgr ? "1" : "0");
@@ -47,38 +63,69 @@ function saveChanges()
 		uci.set("gargoyle_stamgr","global","disconnect_quality_threshold",document.getElementById("disconnectqualthresh").value);
 		uci.set("gargoyle_stamgr","global","connect_quality_threshold",document.getElementById("connectqualthresh").value);
 		uci.set("gargoyle_stamgr","global","blacklist_timer",document.getElementById("blacklisttimer").value);
-		
-		// add ap sections
-		var addAP = function(cfg_id,radio,ssid,bssid,encryption,password)
+
+		// add/update ap sections
+		var addAP = function(radio,ssid,bssid,encryption,password)
 		{
-			uci.set("gargoyle_stamgr", cfg_id, "", "stacfg");
+			var key = bssid ? ("bssid|" + bssid) : ("radiossid|" + radio + "|" + ssid);
+			var cfg_id = apByKey[key];
+			if(cfg_id != null)
+			{
+				apMatched[cfg_id] = true;
+			}
+			else
+			{
+				cfg_id = "stamgr_ap_" + (++apMaxIdx);
+				uci.set("gargoyle_stamgr", cfg_id, "", "stacfg");
+				apSectionCommands.push("uci set gargoyle_stamgr." + cfg_id + "=stacfg");
+			}
 			uci.set("gargoyle_stamgr", cfg_id, "radio", radio);
 			uci.set("gargoyle_stamgr", cfg_id, "ssid", ssid);
 			if(bssid != "")
 			{
 				uci.set("gargoyle_stamgr", cfg_id, "bssid", bssid);
 			}
+			else
+			{
+				uci.remove("gargoyle_stamgr", cfg_id, "bssid");
+			}
 			uci.set("gargoyle_stamgr", cfg_id, "encryption", encryption);
 			if(password != "")
 			{
 				uci.set("gargoyle_stamgr", cfg_id, "key", password);
 			}
-			apSectionCommands.push("uci set gargoyle_stamgr." + cfg_id + "=stacfg");
+			else
+			{
+				uci.remove("gargoyle_stamgr", cfg_id, "key");
+			}
 		};
-		
+
 		HTMLapTable = document.getElementById("wireless_station_container").firstChild;
 		apData = getTableDataArray(HTMLapTable, true, true);
-		
+
 		for(apIdx = 0; apIdx < apData.length; apIdx++)
 		{
-			cfgid = "stamgr_ap_" + (apIdx+1);
 			radio = translateBackendFrontend(apData[apIdx][1],radioList);
 			bssid = apData[apIdx][3] == "-" ? "" : apData[apIdx][3];
 			encryption = translateBackendFrontend(apData[apIdx][4],encryptionList);
 			password = encryption == "none" ? "" : apData[apIdx][5];
-			
-			addAP(cfgid,radio,apData[apIdx][2],bssid,encryption,password);
+
+			addAP(radio,apData[apIdx][2],bssid,encryption,password);
 		}
+
+		// Any AP section this tab knew about that no current row still maps
+		// to (by identity) was actually removed by the user in this tab --
+		// delete only those, not every section wholesale.
+		Object.keys(apByKey).forEach(function(key)
+		{
+			var secName = apByKey[key];
+			if(apMatched[secName] == null)
+			{
+				uciOriginal.removeSection("gargoyle_stamgr", secName);
+				uci.removeSection("gargoyle_stamgr", secName);
+				apSectionCommands.push("uci del gargoyle_stamgr." + secName);
+			}
+		});
 
 		commands = "/etc/init.d/gargoyle_stamgr stop\n";
 		commands += apSectionCommands.join("\n") + "\n";
