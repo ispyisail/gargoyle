@@ -31,6 +31,7 @@ prtS.TIP="To IP";
 prtS.TPrt="To Port";
 prtS.SPrt="Start Port";
 prtS.EPrt="End Port";
+prtS.SrcZone="Source Zone";
 
 //javascript
 prtS.AFRErr="Could not add forwarding rule.";

@@ -24,3 +24,7 @@
 					<label class="col-xs-5" id='addor_ip_label' for='addor_ip'>IPv6</label>
 					<span class="col-xs-7"><input type='text' id='addor_ip' oninput='proofreadIp6Range(this)' maxLength='40' class='form-control' /></span>
 				</div>
+				<div class="row form-group">
+					<label class="col-xs-5" id='addor_src_zone_label' for='addor_src_zone'><%~ port.SrcZone %></label>
+					<span class="col-xs-7"><select id='addor_src_zone' class='form-control'></select></span>
+				</div>
