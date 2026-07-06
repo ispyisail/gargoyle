@@ -23,16 +23,24 @@ function saveChanges()
 {
 	setControlsEnabled(false, true);
 
-	//remove old quotas
+	// Quotas already have a stable identity (removeQuotaCallback/editQuota
+	// operate on the existing section directly, by "id", never rebuilding
+	// by position) -- the only bug was here: unconditionally stripping
+	// every quota section out of uciOriginal (the diff baseline) before
+	// calling uci.getScriptCommands(uciOriginal) below. Once the baseline
+	// no longer has a quota's old field values, EVERY field of EVERY quota
+	// looks "changed" to the diff (there's nothing to compare against),
+	// so every save rewrote every quota's fields wholesale from whatever
+	// this tab's own uci model currently held -- the same corruption class
+	// fixed in dhcp.js's saveChanges() (see ispyisail/gargoyle#26): a
+	// second, stale tab's save would blast fields it never touched with
+	// its own outdated values, silently reverting a first tab's already-
+	// saved edit. uciOriginal is left untouched here; getScriptCommands'
+	// own per-key diff already correctly emits "uci del" for a quota
+	// removeQuotaCallback actually removed from uci (its keys simply
+	// vanish from uci's side, which the diff detects on its own), and
+	// nothing at all for an unedited quota's fields (both sides agree).
 	var preCommands = [];
-	var allOriginalQuotas = uciOriginal.getAllSectionsOfType(pkg, "quota");
-	while(allOriginalQuotas.length > 0)
-	{
-		var section = allOriginalQuotas.shift();
-		uciOriginal.removeSection(pkg, section);
-		preCommands.push("uci del " + pkg + "." + section);
-	}
-	preCommands.push("uci commit");
 
 	var allNewQuotas = uci.getAllSectionsOfType(pkg, "quota");
 	var quotaUseVisibleCommand = "\nuci del gargoyle.status.quotause ; uci commit ;\n"
