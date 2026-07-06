@@ -7,21 +7,48 @@ function saveChanges()
 	setControlsEnabled(false, true, UI.waitText);
 
 	var removeCommands = [];
-	var oldSections = uciOriginal.getAllSectionsOfType("network", "route");
-	while(oldSections.length > 0)
+
+	// Match existing route/route6 sections to current-table rows by
+	// identity (family + destination network + interface) instead of
+	// deleting every section this tab's uciOriginal knows about and
+	// rebuilding all of them fresh by row position -- the same corruption
+	// class fixed in dhcp.js's saveChanges() (see ispyisail/gargoyle#26).
+	// Reusing a matched section lets uci.getScriptCommands()'s normal
+	// per-field diff emit commands only for fields a tab actually changed,
+	// so a stale tab's save no longer silently reverts another tab's
+	// already-saved edit to a route it never touched.
+	var byKey = {};
+	var maxIdx = -1;
+	["route", "route6"].forEach(function(secType)
 	{
-		var delSection = oldSections.pop();
-		uciOriginal.removeSection("network", delSection);
-		removeCommands.push("uci del network." + delSection);
-	}
-	var oldSections = uciOriginal.getAllSectionsOfType("network", "route6");
-	while(oldSections.length > 0)
+		var secs = uciOriginal.getAllSectionsOfType("network", secType);
+		for(var i = 0; i < secs.length; i++)
+		{
+			var secName = secs[i];
+			var target = uciOriginal.get("network", secName, "target");
+			var netmask = uciOriginal.get("network", secName, "netmask");
+			var iface = uciOriginal.get("network", secName, "interface");
+			var key = secType + "|" + (target||"") + "|" + (netmask||"") + "|" + (iface||"");
+			byKey[key] = secName;
+			var m = secName.match(/^route(\d+)$/);
+			if(m != null) { maxIdx = Math.max(maxIdx, parseInt(m[1], 10)); }
+		}
+	});
+	var matched = {};
+
+	function resolveRouteSection(key, secType, uci)
 	{
-		var delSection = oldSections.pop();
-		uciOriginal.removeSection("network", delSection);
-		removeCommands.push("uci del network." + delSection);
+		var existing = byKey[key];
+		if(existing != null)
+		{
+			matched[existing] = true;
+			return existing;
+		}
+		var newName = "route" + (++maxIdx);
+		uci.set("network", newName, "", secType);
+		removeCommands.push("uci set network." + newName + "=" + secType);
+		return newName;
 	}
-	removeCommands.push("uci commit");
 
 	var uci = uciOriginal.clone();
 	var staticRouteTable = document.getElementById('static_route_table_container').firstChild;
@@ -35,15 +62,14 @@ function saveChanges()
 		var netmask = destParts[1];
 		var iface   = row[1];
 		var gateway = (row[2] == "*") ? "0.0.0.0" : row[2];
-		var routeId = "route" + (routeIndex+1);
-		uci.set("network", routeId, "", "route");
+		var key = "route|" + dest + "|" + netmask + "|" + iface;
+		var routeId = resolveRouteSection(key, "route", uci);
 		uci.set("network", routeId, "target", dest);
 		uci.set("network", routeId, "interface", iface);
 		uci.set("network", routeId, "gateway", gateway);
-		if(netmask != ""){ uci.set("network", routeId, "netmask", netmask); }
+		if(netmask != ""){ uci.set("network", routeId, "netmask", netmask); } else { uci.remove("network", routeId, "netmask"); }
 	}
 
-	var routeIdxOffset = routeIndex;
 	var staticRouteTable = document.getElementById('static_route6_table_container').firstChild;
 	var staticRouteData = getTableDataArray(staticRouteTable, true, false);
 	var routeIndex = 0;
@@ -55,12 +81,27 @@ function saveChanges()
 		var netmask = destParts[1];
 		var iface   = row[1];
 		var gateway = (row[2] == "*") ? "::" : row[2];
-		var routeId = "route" + (routeIndex+1+routeIdxOffset);
-		uci.set("network", routeId, "", "route6");
+		var key = "route6|" + dest+"/"+netmask + "||" + iface;
+		var routeId = resolveRouteSection(key, "route6", uci);
 		uci.set("network", routeId, "target", dest+"/"+netmask);
 		uci.set("network", routeId, "interface", iface);
 		uci.set("network", routeId, "gateway", gateway);
 	}
+
+	// Any section this tab knew about that no current row still maps to
+	// (by identity) was actually removed by the user in this tab -- delete
+	// only those, not every section wholesale.
+	Object.keys(byKey).forEach(function(key)
+	{
+		var secName = byKey[key];
+		if(matched[secName] == null)
+		{
+			uciOriginal.removeSection("network", secName);
+			uci.removeSection("network", secName);
+			removeCommands.push("uci del network." + secName);
+		}
+	});
+	removeCommands.push("uci commit");
 
 	commands = removeCommands.join("\n") + "\n" + uci.getScriptCommands(uciOriginal)  +  "\nsh /usr/lib/gargoyle/restart_network.sh ;\n";
 ;
