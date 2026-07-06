@@ -24,3 +24,7 @@
 					<label class="col-xs-5" id='addr_ip_label' for='addr_ip'><%~ TIP %></label>
 					<span class="col-xs-7"><input type='text' id='addr_ip' oninput='proofreadIp(this)' maxLength='15' class='form-control' /></span>
 				</div>
+				<div class="row form-group">
+					<label class="col-xs-5" id='addr_src_zone_label' for='addr_src_zone'><%~ port.SrcZone %></label>
+					<span class="col-xs-7"><select id='addr_src_zone' class='form-control'></select></span>
+				</div>
