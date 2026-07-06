@@ -15,6 +15,20 @@ function saveChanges()
 	var typeIndex=0;
 	var deleteSectionCommands = [];
 	var createSectionCommands = [];
+
+	// Rule/exception sections already have a stable identity (removeRule /
+	// removeException below call uci.removeSection(pkg, id) directly on the
+	// existing section, never rebuilding by row position) -- the only bug
+	// was here: unconditionally stripping every rule/exception section out
+	// of uciOriginal (the diff baseline) before calling
+	// uci.getScriptCommands(uciOriginal) below. Once the baseline no longer
+	// has a rule's old field values, EVERY field of EVERY rule looks
+	// "changed" to the diff (nothing to compare against), so every save
+	// rewrote every rule's fields wholesale from whatever this tab's own uci
+	// model currently held -- the same corruption class fixed in dhcp.js's
+	// saveChanges() (see ispyisail/gargoyle#26): a second, stale tab's save
+	// would blast fields it never touched with its own outdated values,
+	// silently reverting a first tab's already-saved edit.
 	for(typeIndex=0; typeIndex < ruleTypes.length; typeIndex++)
 	{
 		//set enabled status to corrospond with checked in table
@@ -24,29 +38,25 @@ function saveChanges()
 		for(ruleIndex =0; ruleIndex < ruleData.length; ruleIndex++)
 		{
 			var check = ruleData[ruleIndex][1];
-			enabledRuleFound = enabledRuleFound || check.checked; 
+			enabledRuleFound = enabledRuleFound || check.checked;
 			uci.set(pkg, check.id, "enabled", check.checked ? "1" : "0");
 		}
 
-
-		//delete all sections of type in uciOriginal & remove them from uciOriginal
+		// Only a genuinely new section (one uci knows about that
+		// uciOriginal never did) needs its type declared; an existing
+		// section already has one, and re-declaring it on every save for
+		// every rule is exactly the kind of unnecessary per-save command
+		// volume the multi-tab fix (and the analogous fix in quotas.js)
+		// avoids.
 		var originalSections = uciOriginal.getAllSectionsOfType(pkg, ruleTypes[typeIndex]);
-		var sectionIndex = 0;
-		for(sectionIndex=0; sectionIndex < originalSections.length; sectionIndex++)
-		{
-			var isIngress = uciOriginal.get(pkg, originalSections[sectionIndex], "is_ingress");
-			if(isIngress != "1")
-			{
-				uciOriginal.removeSection(pkg, originalSections[sectionIndex]);
-				deleteSectionCommands.push("uci del " + pkg + "." + originalSections[sectionIndex]);
-			}
-		}
-
-		//create/initialize  sections in uci
 		var newSections = uci.getAllSectionsOfType(pkg, ruleTypes[typeIndex]);
+		var sectionIndex = 0;
 		for(sectionIndex=0; sectionIndex < newSections.length; sectionIndex++)
 		{
-			createSectionCommands.push("uci set " + pkg + "." + newSections[sectionIndex] + "='" + ruleTypes[typeIndex] + "'");
+			if(originalSections.indexOf(newSections[sectionIndex]) === -1)
+			{
+				createSectionCommands.push("uci set " + pkg + "." + newSections[sectionIndex] + "='" + ruleTypes[typeIndex] + "'");
+			}
 		}
 	}
 	deleteSectionCommands.push("uci commit");
