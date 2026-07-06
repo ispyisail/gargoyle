@@ -11,13 +11,15 @@
 	echo ""
 
 	if [ -n "$FORM_commands" ] ; then
-		tmp_file=$(mktemp /tmp/gargoyle_cmd.XXXXXX.sh)
-		printf "%s" "$FORM_commands" | tr -d "\r" > "$tmp_file"
-		(
-			flock -x 200
-			sh "$tmp_file"
-		) 200>/var/lock/gargoyle_uci.lock
-		rm -f "$tmp_file"
+		tmp_file=$(mktemp /tmp/gargoyle_cmd.XXXXXX)
+		if [ -n "$tmp_file" ] ; then
+			printf "%s" "$FORM_commands" | tr -d "\r" > "$tmp_file"
+			(
+				flock -x 200
+				sh "$tmp_file"
+			) 200>/var/lock/gargoyle_uci.lock
+			rm -f "$tmp_file"
+		fi
 	fi
 	echo "Success"
 ?>
