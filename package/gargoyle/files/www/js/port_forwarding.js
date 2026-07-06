@@ -1325,7 +1325,7 @@ function addPortoRangeRule()
 			rowData = currentRangeData[rowDataIndex];
 			if( otherProto == rowData[1] &&  values[2] == rowData[2] && values[3] == rowData[3] && values[4] == rowData[4] && values[5] == rowData[5])
 			{
-				portfRangeTable.rows[(rowDataIndex*1)+1].childNodes[1].firstChild.data = UI.both;
+				portoRangeTable.rows[(rowDataIndex*1)+1].childNodes[1].firstChild.data = UI.both;
 				if(values[0] != '-' && rowData[0] == '-')
 				{
 					portoRangeTable.rows[(rowDataIndex*1)+1].childNodes[0].firstChild.data = values[0];
