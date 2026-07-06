@@ -22,13 +22,37 @@ function saveChanges()
 		setControlsEnabled(false, true);
 
 		var staticHostCommands = [];
-		var staticHostSections = uciOriginal.getAllSectionsOfType("dhcp", "host");
-		while(staticHostSections.length > 0)
+
+		// Match existing sections to current-table rows by MAC (a stable
+		// identity) instead of unconditionally deleting every section this
+		// tab's uciOriginal knows about and rebuilding all of them fresh by
+		// row position. The old approach meant any save from this page
+		// rewrote every device wholesale from whatever this tab's own
+		// (possibly stale) table showed: if a second tab had already saved
+		// an edit to a device this tab never touched, that edit got
+		// silently reverted the moment this tab saved anything at all, with
+		// no warning anywhere (the long-reported multi-tab corruption bug).
+		// Reusing a matched section and relying on uci.getScriptCommands()'s
+		// normal per-field diff means a save only touches fields this tab
+		// actually changed, exactly like every other page already behaves.
+		var existingHostSections = uciOriginal.getAllSectionsOfType("dhcp", "host");
+		var macToSection = {};
+		var maxDeviceIndex = 0;
+		for(var esIdx = 0; esIdx < existingHostSections.length; esIdx++)
 		{
-			var lastSection = staticHostSections.pop();
-			uciOriginal.removeSection("dhcp", lastSection);
-			staticHostCommands.push("uci del dhcp." + lastSection);
+			var esName = existingHostSections[esIdx];
+			var esMac = uciOriginal.get("dhcp", esName, "mac");
+			if(esMac != null && esMac != "")
+			{
+				macToSection[esMac.toLowerCase()] = esName;
+			}
+			var esMatch = esName.match(/^device_(\d+)$/);
+			if(esMatch != null)
+			{
+				maxDeviceIndex = Math.max(maxDeviceIndex, parseInt(esMatch[1], 10));
+			}
 		}
+
 		uci = uciOriginal.clone();
 		uci.remove('dhcp', dhcpSection, 'ignore');
 		uci.set('dhcp', dhcpSection, 'interface', 'lan');
@@ -68,21 +92,44 @@ function saveChanges()
 		// dhcp-host lines => dnsmasq cannot be crashed by this page.
 		var devTable = document.getElementById('devices_table_container').firstChild;
 		var devData = getTableDataArray(devTable, true, false);
+		var matchedSections = {};
 		for(var devIdx = 0; devIdx < devData.length; devIdx++)
 		{
 			var row = devData[devIdx];
 			var rMac = row[1];
 			if(rMac == "" || rMac == "-") { continue; }   // MAC required
-			var cfgid = "device_" + (devIdx + 1);
-			uci.set("dhcp", cfgid, "", "host");
+
+			var existingMatch = macToSection[rMac.toLowerCase()];
+			var cfgid;
+			if(existingMatch != null)
+			{
+				// Reuse the existing section so the per-field diff below
+				// only emits commands for fields this tab actually changed
+				// -- untouched fields stay exactly as this tab's own
+				// oldSettings already had them, so an edit another tab
+				// already saved to a field THIS tab never touched survives.
+				cfgid = existingMatch;
+				matchedSections[cfgid] = true;
+			}
+			else
+			{
+				// Genuinely new device -- keep the existing device_N naming
+				// convention, continuing from the highest index this tab
+				// knows about (rather than raw table position) so it stays
+				// stable even when earlier rows were reused, not recreated.
+				maxDeviceIndex = maxDeviceIndex + 1;
+				cfgid = "device_" + maxDeviceIndex;
+				uci.set("dhcp", cfgid, "", "host");
+				staticHostCommands.push("uci set dhcp." + cfgid + "=host");
+			}
 
 			var rName = row[0];
-			if(rName != "" && rName != "-") { uci.set("dhcp", cfgid, "name", rName); }
+			if(rName != "" && rName != "-") { uci.set("dhcp", cfgid, "name", rName); } else { uci.remove("dhcp", cfgid, "name"); }
 
 			uci.set("dhcp", cfgid, "mac", rMac);
 
 			var rIp = row[2];
-			if(rIp != "" && rIp != "-") { uci.set("dhcp", cfgid, "ip", rIp); }
+			if(rIp != "" && rIp != "-") { uci.set("dhcp", cfgid, "ip", rIp); } else { uci.remove("dhcp", cfgid, "ip"); }
 
 			var rHostid = row[3];
 			if(rHostid != "" && rHostid != "-")
@@ -94,14 +141,27 @@ function saveChanges()
 				}
 				uci.set("dhcp", cfgid, "hostid", splitHostId.join(''));
 			}
+			else { uci.remove("dhcp", cfgid, "hostid"); }
 
 			var rDuid = row[4];
-			if(rDuid != "" && rDuid != "-") { uci.set("dhcp", cfgid, "duid", rDuid); }
+			if(rDuid != "" && rDuid != "-") { uci.set("dhcp", cfgid, "duid", rDuid); } else { uci.remove("dhcp", cfgid, "duid"); }
 
 			var rGroup = row[5];
-			if(rGroup != "" && rGroup != "-") { uci.set("dhcp", cfgid, "group", rGroup); }
+			if(rGroup != "" && rGroup != "-") { uci.set("dhcp", cfgid, "group", rGroup); } else { uci.remove("dhcp", cfgid, "group"); }
+		}
 
-			staticHostCommands.push("uci set dhcp." + cfgid + "=host");
+		// Any section this tab knew about that no row still maps to (by
+		// MAC) was actually removed by the user in this tab -- delete only
+		// those, not every section wholesale.
+		for(var esIdx2 = 0; esIdx2 < existingHostSections.length; esIdx2++)
+		{
+			var esName2 = existingHostSections[esIdx2];
+			if(matchedSections[esName2] == null)
+			{
+				uciOriginal.removeSection("dhcp", esName2);
+				uci.removeSection("dhcp", esName2);
+				staticHostCommands.push("uci del dhcp." + esName2);
+			}
 		}
 
 		// We don't use /etc/ethers anymore
