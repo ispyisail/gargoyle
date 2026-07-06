@@ -21,6 +21,21 @@ function saveChanges()
 	var bwmonCleanCommand = bwmonCleanCommand + "if [ -d /tmp/data/bwmon/ ] ; then rm /tmp/data/bwmon/qos-" + direction + "-* >/dev/null 2>&1 ; fi ;\n";
 
 
+	var isCake = document.getElementById("cake_enabled").checked;
+	uci.set("qos_gargoyle", direction, "cake_enabled", isCake ? "1" : "0");
+	if(isCake)
+	{
+		var overhead = document.getElementById("cake_overhead").value;
+		if(overhead != "none")
+		{
+			uci.set("qos_gargoyle", direction, "cake_overhead", overhead);
+		}
+		else
+		{
+			uci.remove("qos_gargoyle", direction, "cake_overhead");
+		}
+	}
+
 	//Save the setting of the qos_monenable flag
 	if (direction == "download")
 	{
@@ -54,7 +69,7 @@ function saveChanges()
 	var switchingFullQosEnabled = (fullQosWillBeEnabled != qosEnabled);
 
 	//Is the user requesting disable of this direction of QoS?
-	if(disabled)
+	if(disabled && !isCake)
 	{
 		//If this page was enabled before and the other was not then stop and disable QoS
 		if(qosEnabled && alternateBandwidth == "" )
@@ -82,6 +97,21 @@ function saveChanges()
 	else if(validateNumeric(document.getElementById("total_bandwidth").value) != 0)
 	{
 		errors=qosStr.TotErr;
+	}
+	else if(isCake)
+	{
+		qosEnabled = true;
+		uci.set("gargoyle", "status", "qos", "300");
+		uci.set("qos_gargoyle", direction, "total_bandwidth", document.getElementById("total_bandwidth").value);
+		if(switchingFullQosEnabled && qosQuotasExist())
+		{
+			commands = uci.getScriptCommands(uciOriginal) + "\n/etc/init.d/qos_gargoyle enable ;\nsh /usr/lib/gargoyle/restart_firewall.sh ;\n";
+		}
+		else
+		{
+			commands = "\n/etc/init.d/qos_gargoyle start ;\n/etc/init.d/qos_gargoyle enable ;\n";
+			commands = uci.getScriptCommands(uciOriginal) + "\n" + commands + stopbwmon + bwmonCleanCommand + startbwmon;
+		}
 	}
 	else
 	{
@@ -560,6 +590,10 @@ function resetData()
 
 	}
 
+	document.getElementById("cake_enabled").checked = cakeEnabled;
+	document.getElementById("cake_overhead").value = cakeOverhead;
+	setCakeMode();
+
 	setQosEnabled();
 
 	//Startup the dynamic screen updates.
@@ -640,6 +674,29 @@ function setQosEnabled()
 
 	resetRuleControls();
 	resetServiceClassControls();
+}
+
+function setCakeMode()
+{
+	var isCake = document.getElementById("cake_enabled").checked;
+	var hfscPanels = ["qos_class_table_container", "qos_rule_table_container",
+	                  "add_class_container", "add_rule_container",
+	                  "default_class_label", "default_class",
+	                  "qos_monitor_container", "acc_panel"];
+	for(var i = 0; i < hfscPanels.length; i++)
+	{
+		var el = document.getElementById(hfscPanels[i]);
+		if(el) { el.style.display = isCake ? "none" : ""; }
+	}
+	var cakePanel = document.getElementById("cake_options_panel");
+	if(cakePanel) { cakePanel.style.display = isCake ? "" : "none"; }
+	var cakeStatusPanel = document.getElementById("cake_status_panel");
+	if(cakeStatusPanel) { cakeStatusPanel.style.display = isCake ? "" : "none"; }
+	// Bandwidth field must always be editable in CAKE mode (used for shaper bandwidth)
+	if(isCake)
+	{
+		setElementEnabled(document.getElementById("total_bandwidth"), true, "");
+	}
 }
 
 function addClassificationRule()
@@ -1111,19 +1168,17 @@ function updatetc()
 	{
 		updateInProgress = true;
 
-		var commands="tc -s class show dev ";
+		var cakeActive = document.getElementById("cake_enabled") && document.getElementById("cake_enabled").checked;
+		var tcDev = direction == "download" ? "ifb0" : currentWanName;
+		var commands;
 
-		if (direction == "download")
+		if(cakeActive)
 		{
-			commands = commands + "ifb0";
+			commands = "tc qdisc show dev " + tcDev;
 		}
 		else
 		{
-			/*
-			 * NOTE: This NEEDS to be "currentWanName" variable NOT "currentWanIf" Variable!!!
-			 * If this doesn't work the problem is in gargoyle_header_footer utility, not here
-			 */
-			commands = commands + currentWanName;
+			commands = "tc -s class show dev " + tcDev;
 		}
 
 		var param = getParameterDefinition("commands", commands) + "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
@@ -1132,6 +1187,24 @@ function updatetc()
 		{
 			if(req.readyState == 4)
 			{
+				if(cakeActive)
+				{
+					var statusEl = document.getElementById("cake_active_status");
+					if(statusEl)
+					{
+						if(req.responseText.indexOf("cake") >= 0)
+						{
+							statusEl.innerHTML = "<span style='color:green;font-weight:bold;'>Active</span>";
+						}
+						else
+						{
+							statusEl.innerHTML = "<span style='color:red;'>Inactive &mdash; restart QoS to apply</span>";
+						}
+					}
+					updateInProgress = false;
+					return;
+				}
+
 				/*Only match leaf classes and class with 2 digit class numbers since on the upload side class 1:127 is only for qosmon*/
 				var lines = req.responseText.match(/hfsc\s1:[0-9]{1,2}\s.+leaf.+\n.+Sent\s[0-9]+/g);
 				var d=new Date();
