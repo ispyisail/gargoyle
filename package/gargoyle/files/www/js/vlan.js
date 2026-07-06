@@ -604,29 +604,61 @@ function saveChanges()
 
 	var uci = uciOriginal.clone();
 
-	// Clean slate: every VLAN-manager-owned section (the reserved Default
-	// LAN vlan_1, every user VLAN, the access matrix, and the pinhole
-	// exceptions) is rebuilt fresh below.
+	// Match existing VLAN/matrix/pinhole sections to the current in-memory
+	// model by identity instead of unconditionally deleting every
+	// VLAN-manager-owned section this tab's uciOriginal knows about and
+	// rebuilding all of them fresh -- the same corruption class fixed in
+	// dhcp.js's saveChanges() (see ispyisail/gargoyle#26). A VLAN this tab
+	// never touched, or a matrix/pinhole entry another tab already saved,
+	// no longer gets silently reverted the moment this tab saves anything
+	// at all. Only a section whose identity genuinely no longer exists in
+	// the current model (VLAN removed, matrix cell unchecked, pinhole row
+	// deleted) gets torn down.
+	//
+	// VLAN definitions already use a stable, deterministic section name
+	// (vlan_<id>, keyed by the user-chosen VLAN ID, not row position) --
+	// only VLANs actually removed from vlanDefs need deleting. The access
+	// matrix moves from positional fwd_matrix_<idx> naming to deterministic
+	// fwd_matrix_<src>_<dest> naming, since a (src,dest) pair is already a
+	// unique identity by construction (one checkbox per pair) -- no lookup
+	// needed at all, just delete whichever previously-true pairs are no
+	// longer checked. Pinholes have no such natural section-name identity
+	// (a rule's dest_ip/dest_port/proto aren't valid section-name
+	// characters), so they use the same match-by-content-and-reuse approach
+	// as the other fixed pages.
+	var currentVlanIds = {};
+	vlanDefs.forEach(function(d) { currentVlanIds[d.id] = true; });
 	var bridgeVlanSecs = uci.getAllSectionsOfType('network','bridge-vlan');
 	bridgeVlanSecs.forEach(function(sec) {
 		var m = sec.match(/^vlan_([0-9]+)$/);
 		if(m === null) { return; }
 		var vid = m[1];
+		if(vid == '1' || currentVlanIds[vid]) { return; } // reserved, or still defined -- reused below
 		uci.removeSection('network', sec);
-		if(vid != '1')
-		{
-			uci.removeSection('network', 'vlan' + vid);
-			uci.removeSection('dhcp', 'vlan' + vid);
-			uci.removeSection('firewall', 'zone_vlan' + vid);
-			uci.removeSection('firewall', 'fwd_vlan' + vid + '_wan');
-		}
+		uci.removeSection('network', 'vlan' + vid);
+		uci.removeSection('dhcp', 'vlan' + vid);
+		uci.removeSection('firewall', 'zone_vlan' + vid);
+		uci.removeSection('firewall', 'fwd_vlan' + vid + '_wan');
+	});
+
+	var currentMatrixPairs = {};
+	buildMatrixForwardingPairs(accessMatrix).forEach(function(pair) {
+		currentMatrixPairs['fwd_matrix_' + pair.src + '_' + pair.dest] = true;
 	});
 	uci.getAllSectionsOfType('firewall','forwarding').forEach(function(sec) {
-		if(sec.match(/^fwd_matrix_/) !== null) { uci.removeSection('firewall', sec); }
+		if(sec.match(/^fwd_matrix_/) !== null && currentMatrixPairs[sec] == null) { uci.removeSection('firewall', sec); }
 	});
+
+	var pinholeByKey = {};
+	var pinholeMaxIdx = -1;
 	uci.getAllSectionsOfType('firewall','rule').forEach(function(sec) {
-		if(sec.match(/^vlan_pinhole_/) !== null) { uci.removeSection('firewall', sec); }
+		if(sec.match(/^vlan_pinhole_/) === null) { return; }
+		var key = uci.get('firewall', sec, 'src') + "|" + uci.get('firewall', sec, 'dest') + "|" + uci.get('firewall', sec, 'dest_ip') + "|" + uci.get('firewall', sec, 'dest_port') + "|" + uci.get('firewall', sec, 'proto');
+		pinholeByKey[key] = sec;
+		var m = sec.match(/^vlan_pinhole_(\d+)$/);
+		if(m != null) { pinholeMaxIdx = Math.max(pinholeMaxIdx, parseInt(m[1], 10)); }
 	});
+	var pinholeMatched = {};
 
 	if(vlanDefs.length == 0)
 	{
@@ -732,9 +764,11 @@ function saveChanges()
 			uci.set('firewall', 'fwd_' + ifaceName + '_wan', 'dest', 'wan');
 		});
 
-		// Access matrix: one forwarding section per checked (src,dest) cell.
-		buildMatrixForwardingPairs(accessMatrix).forEach(function(pair, idx) {
-			var sec = 'fwd_matrix_' + idx;
+		// Access matrix: one forwarding section per checked (src,dest) cell,
+		// named deterministically after that pair -- no lookup needed, and
+		// unrelated cells this tab didn't touch are never referenced at all.
+		buildMatrixForwardingPairs(accessMatrix).forEach(function(pair) {
+			var sec = 'fwd_matrix_' + pair.src + '_' + pair.dest;
 			uci.set('firewall', sec, '', 'forwarding');
 			uci.set('firewall', sec, 'src', zoneNameForId(pair.src));
 			uci.set('firewall', sec, 'dest', zoneNameForId(pair.dest));
@@ -743,17 +777,39 @@ function saveChanges()
 		// Pinhole exceptions: one host/port-specific ACCEPT rule per row,
 		// the same rule shape port_forwarding.js already writes for
 		// WAN-facing open-port rules, just with a LAN-side zone pair.
-		pinholes.forEach(function(p, idx) {
-			var sec = 'vlan_pinhole_' + idx;
-			uci.set('firewall', sec, '', 'rule');
+		// Matched to an existing section by its actual content (no stable
+		// section-name identity is possible here -- an IP/port aren't valid
+		// section-name characters), reusing it so an unrelated pinhole this
+		// tab didn't touch never gets rewritten.
+		pinholes.forEach(function(p) {
+			var srcZone = zoneNameForId(p.srcId);
+			var destZone = zoneNameForId(p.destZone);
+			var key = srcZone + "|" + destZone + "|" + p.destIp + "|" + p.destPort + "|" + p.proto;
+			var sec = pinholeByKey[key];
+			if(sec != null)
+			{
+				pinholeMatched[sec] = true;
+			}
+			else
+			{
+				sec = 'vlan_pinhole_' + (++pinholeMaxIdx);
+				uci.set('firewall', sec, '', 'rule');
+			}
 			uci.set('firewall', sec, 'name', p.desc);
-			uci.set('firewall', sec, 'src', zoneNameForId(p.srcId));
-			uci.set('firewall', sec, 'dest', zoneNameForId(p.destZone));
+			uci.set('firewall', sec, 'src', srcZone);
+			uci.set('firewall', sec, 'dest', destZone);
 			uci.set('firewall', sec, 'dest_ip', p.destIp);
-			if(p.destPort !== "") { uci.set('firewall', sec, 'dest_port', p.destPort); }
+			if(p.destPort !== "") { uci.set('firewall', sec, 'dest_port', p.destPort); } else { uci.remove('firewall', sec, 'dest_port'); }
 			uci.set('firewall', sec, 'proto', p.proto);
 			uci.set('firewall', sec, 'family', 'ipv4');
 			uci.set('firewall', sec, 'target', 'ACCEPT');
+		});
+
+		// Any pinhole section this tab knew about that no current row still
+		// maps to (by content) was actually removed by the user in this tab.
+		Object.keys(pinholeByKey).forEach(function(key) {
+			var sec = pinholeByKey[key];
+			if(pinholeMatched[sec] == null) { uci.removeSection('firewall', sec); }
 		});
 	}
 
