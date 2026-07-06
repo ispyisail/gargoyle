@@ -157,6 +157,21 @@ function saveChanges()
 		// Remove old WAN VLANs
 		var switchVLAN = uci.get('network','switch_wan_vlan');
 		var switchSecs = uci.getAllSectionsOfType('network','switch_vlan');
+		// Whether this save will land on the DSA multi-row WAN VLAN rebuild
+		// path below (mirrors that branch's own guard chain) -- used just
+		// below to decide which existing wan_vlan* sections can be left in
+		// place vs. must be torn down as a genuine removal/protocol switch.
+		var willRebuildDsaWanVlans = document.getElementById("global_gateway").checked
+			&& getSelectedValue('wan_protocol') != 'none'
+			&& !getSelectedValue("wan_protocol").match(/wireless/)
+			&& !singleEthernetIsWan()
+			&& !getSelectedValue("wan_protocol").match(/3g/)
+			&& !getSelectedValue("wan_protocol").match(/qmi/)
+			&& !getSelectedValue("wan_protocol").match(/ncm/)
+			&& !getSelectedValue("wan_protocol").match(/mbim/)
+			&& !getSelectedValue("wan_protocol").match(/cdc/)
+			&& !getSelectedValue("wan_protocol").match(/iph/)
+			&& switchSecs.length == 0;
 		if(switchSecs.length > 0 && switchVLAN == '' && defaultWanIf.indexOf('.') > -1)
 		{
 			// We have switch config but switch_wan_vlan missing and original WAN device was a VLAN, do nothing
@@ -187,9 +202,25 @@ function saveChanges()
 		}
 		else
 		{
+			// Which vlan ids the current table will actually recreate below --
+			// only computed when we're staying on the DSA rebuild path, so a
+			// genuine protocol switch away from it still gets the old
+			// unconditional wipe (currentVlanIds/currentExtraVlanIds empty).
+			var currentVlanIds = {};
+			var currentExtraVlanIds = {};
+			if(willRebuildDsaWanVlans)
+			{
+				var vlanRowsForCleanup = getWanVlanTableRows();
+				vlanRowsForCleanup.sort(function(a,b){ return parseInt(a.vid,10) - parseInt(b.vid,10); });
+				vlanRowsForCleanup.forEach(function(row, rowIndex) {
+					currentVlanIds[row.vid] = true;
+					if(rowIndex != 0) { currentExtraVlanIds[row.vid] = true; }
+				});
+			}
 			var devList = uci.getAllSectionsOfType('network','device');
 			devList.forEach(function(devName) {
-				if(devName.match(/^wan_vlan[0-9]+_dev$/) !== null)
+				var m = devName.match(/^wan_vlan([0-9]+)_dev$/);
+				if(m !== null && !currentVlanIds[m[1]])
 				{
 					preCommands = preCommands + "\nuci -q del network." + devName;
 					uci.removeSection('network',devName);
@@ -198,11 +229,16 @@ function saveChanges()
 			});
 			// Additive WAN VLAN rows beyond the first (see saveChanges()'s DSA
 			// branch below) get their own interface + firewall zone, distinct
-			// from the _dev device sections above -- rebuilt fresh from the
-			// table on every save, so tear them all down here first.
+			// from the _dev device sections above. Only tear one down if its
+			// vlan id is gone entirely, or has become the new lowest id
+			// (rolled into network.wan itself instead) -- ids that stay
+			// additive are left alone so the per-field diff only touches what
+			// actually changed, rather than a stale second tab silently
+			// reverting a first tab's already-saved edit.
 			var ifaceList = uci.getAllSectionsOfType('network','interface');
 			ifaceList.forEach(function(ifaceName) {
-				if(ifaceName.match(/^wan_vlan[0-9]+$/) !== null)
+				var m = ifaceName.match(/^wan_vlan([0-9]+)$/);
+				if(m !== null && !currentExtraVlanIds[m[1]])
 				{
 					preCommands = preCommands + "\nuci -q del network." + ifaceName;
 					uci.removeSection('network', ifaceName);
