@@ -139,4 +139,20 @@ int apk_add_mainroot(const char* root, const char* repo, const char* keysdir,
  * failure. */
 int apk_del_mainroot(const char* root, const char* pkg);
 
+/* `apk adbdump --format json <file>` -- dumps a package's ADB metadata,
+ * including its embedded pre-install/post-install SCRIPT TEXT (under
+ * the "scripts" object, keyed "pre-install"/"post-install") -- this is
+ * how gpkg gets script content out of a .apk file for a non-main dest
+ * install, since `apk extract` deliberately never places or runs
+ * scripts (found live while building Phase 4: apk_extract's own
+ * destination tree never contains them, matching its own description,
+ * "extracted without checking dependencies or other metadata"). Needs
+ * NO db/root/keys-dir context at all and does not enforce the file's
+ * signature (confirmed live: succeeds silently, exit 0, on an
+ * untrusted-signature package -- adbdump is a pure metadata read, not
+ * a trust-gated operation like manifest/extract/add). Returns NULL on
+ * failure (apk_run() failure or unparseable output). Caller owns the
+ * result and must json_free() it. */
+json_value* apk_adbdump_json(const char* file);
+
 #endif

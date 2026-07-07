@@ -456,3 +456,37 @@ int apk_del_mainroot(const char* root, const char* pkg)
 	apk_result_free(r);
 	return ok;
 }
+
+
+json_value* apk_adbdump_json(const char* file)
+{
+	const char* argv[6];
+	apk_result* r;
+	json_value* result;
+
+	argv[0] = apk_bin_path();
+	argv[1] = "adbdump";
+	argv[2] = "--format";
+	argv[3] = "json";
+	argv[4] = file;
+	argv[5] = NULL;
+
+	r = apk_run(argv);
+	if(r == NULL) { return NULL; }
+
+	if(r->exit_code != 0)
+	{
+		fprintf(stderr, "apk_adbdump_json: %s\n", (r->err[0] != '\0') ? r->err : r->out);
+		apk_result_free(r);
+		return NULL;
+	}
+
+	result = json_parse(r->out);
+	if(result == NULL)
+	{
+		fprintf(stderr, "apk_adbdump_json: could not parse apk output: %s\n",
+			(r->err[0] != '\0') ? r->err : r->out);
+	}
+	apk_result_free(r);
+	return result;
+}
