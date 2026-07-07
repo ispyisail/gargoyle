@@ -383,7 +383,7 @@ void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* pack
 	}
 
 	char* link_root_name            = get_string_map_element(install_pkg_data, "Link-Destination");
-	char* link_root_path            = link_root_name != NULL ? get_string_map_element(conf->dest_names, install_root_name) : NULL;
+	char* link_root_path            = link_root_name != NULL ? get_string_map_element(conf->dest_names, link_root_name) : NULL;
 	char* control_postfix_list[]    = { "control", "list",  "linked", "conffiles", "prerm", "postrm", "preinst", "postinst", NULL };
 	list* pkg_alternatives			= get_string_map_element(install_pkg_data, "Alternatives");
 
