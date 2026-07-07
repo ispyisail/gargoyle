@@ -124,11 +124,26 @@ ipHostHash["::1"] = "localhost6";
 					</span>
 				</div>
 
+				<div id="alt_gateway_check_container" class="row form-group">
+					<span class="col-xs-12">
+						<input type="checkbox" id="dhcp_use_alt_gateway" onclick="enableAssociatedField(this, 'alt_gateway', defaultAltGateway)"/>
+						<label id="dhcp_alt_gateway_label" for="dhcp_use_alt_gateway"><%~ dhcp.UseAltGW %>:</label>
+					</span>
+				</div>
+
+				<div id="alt_gateway_container" class="row form-group">
+					<label class="col-xs-5" for="alt_gateway" id="alt_gateway_label"><%~ dhcp.AltGW %>:</label>
+					<span class="col-xs-7">
+						<% echo -n "$subnet" %>
+						<input type="text" class="form-control" id="alt_gateway" oninput="proofreadNumeric(this)" size="5" maxlength="3" />
+					</span>
+				</div>
+
 				<div id="dhcp_lease_container" class="row form-group">
 					<label class="col-xs-5" for="dhcp_lease" id="dhcp_lease_label"><%~ LsTm %>:</label>
 					<span class="col-xs-7">
-						<input type="text" class="form-control" oninput="proofreadNumeric(this)" id="dhcp_lease" size="5" maxlength="4" />
-						<em>(<%~ hours %>)</em>
+						<input type="text" class="form-control" oninput="proofreadNumeric(this)" id="dhcp_lease" size="5" maxlength="5" />
+						<em>(<%~ minutes %>)</em>
 					</span>
 				</div>
 
