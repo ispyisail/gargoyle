@@ -19,6 +19,18 @@ PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)
 
 include $(INCLUDE_DIR)/package.mk
 
+# unarchive.c calls seek_by_read() with no prior prototype (2007-era
+# code, extracted from busybox with the declaration left behind).
+# GCC <= 13 only warned; GCC 14 (first used by this toolchain as of
+# the OpenWrt 25.12 bump) makes implicit function declarations a hard
+# error by default, which breaks this package's build outright. Same
+# root cause and same fix already validated for the host-side gapk
+# dev-loop build (tests/gapk/build-host.sh in gargoyle-tools) --
+# applying the identical, already-proven workaround here rather than
+# attempting to source/restore the real prototype from upstream
+# busybox for 2007-era code neither of us has full context on.
+TARGET_CFLAGS += -std=gnu89 -Wno-implicit-function-declaration
+
 define Package/libbbtargz
 	SECTION:=libs
 	CATEGORY:=Libraries
