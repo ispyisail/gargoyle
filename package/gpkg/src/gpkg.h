@@ -86,6 +86,17 @@
 
 
 
+/* gapk re-backend switch (see docs/gapk-implementation-plan.md in
+ * gargoyle-tools): GPKG_BACKEND=apk in the environment selects the new
+ * apk-sourced code paths added starting Phase 3; anything else (unset,
+ * or any other value) runs the original opkg-format paths, unchanged.
+ * gpkg_backend is set once, early in main(), and read (never written)
+ * everywhere else. */
+#define GPKG_BACKEND_OPKG 0
+#define GPKG_BACKEND_APK  1
+extern int gpkg_backend;
+int gpkg_using_apk_backend(void);
+
 /* conf defs/prototypes */
 typedef struct opkg_conf_struct
 {
@@ -100,6 +111,13 @@ typedef struct opkg_conf_struct
 	string_map* dest_names;
 	string_map* dest_freespace;
 	string_map* dest_totalspace;
+
+	/* apk backend connection info (GPKG_BACKEND=apk only; unused and
+	 * left NULL/default otherwise). Parsed from the same conf file as
+	 * everything else so both backends' config lives in one place. */
+	char* apk_root;        /* default "/" if unset */
+	char* apk_repository;  /* path to an APKINDEX.adb; NULL = none configured */
+	char* apk_keys_dir;    /* MUST be absolute if set -- see apkexec.h */
 } opkg_conf;
 
 opkg_conf* load_conf(const char* conf_file_name);
@@ -125,6 +143,7 @@ char** alloc_depend_def(char* def_version_str);
 
 void load_all_package_data(opkg_conf* conf, string_map* package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, char* install_root, int ignore_recursive_variables, string_map* preferred_provides);
 void load_package_data(char* data_source, int source_is_dir, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, char* dest_name, string_map* preferred_provides);
+void load_package_data_apk(opkg_conf* conf, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, string_map* preferred_provides);
 int load_recursive_package_data_variables(string_map* package_data, char* package, int load_size, int load_will_fit, uint64_t free_bytes);
 
 

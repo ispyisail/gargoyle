@@ -4,11 +4,20 @@ string_map* parse_parameters(int argc, char** argv);
 
 void print_usage(void);
 
+int gpkg_backend = GPKG_BACKEND_OPKG;
+
+int gpkg_using_apk_backend(void)
+{
+	return gpkg_backend == GPKG_BACKEND_APK;
+}
+
 
 
 int main(int argc, char** argv)
 {
-	
+	char* backend_env = getenv("GPKG_BACKEND");
+	gpkg_backend = (backend_env != NULL && strcmp(backend_env, "apk") == 0) ? GPKG_BACKEND_APK : GPKG_BACKEND_OPKG;
+
 	string_map* parameters = parse_parameters(argc, argv);
 
 	opkg_conf *conf = load_conf((char*)get_string_map_element(parameters, "config"));
