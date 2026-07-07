@@ -1,9 +1,25 @@
 
 #include "gpkg.h"
+#include "apkexec.h"
 
 
 void update(opkg_conf* conf)
 {
+	/* GPKG_BACKEND=apk: no lists_dir download step exists to refresh --
+	 * load_package_data_apk() (Phase 3) queries apk_query_json live on
+	 * every load_all_package_data() call already, so there's nothing
+	 * else for this subcommand to do beyond a thin passthrough to apk's
+	 * own index-cache refresh for the main root (see
+	 * docs/gapk-implementation-plan.md Phase 5 in gargoyle-tools). */
+	if(gpkg_using_apk_backend())
+	{
+		if(!apk_update_mainroot(conf->apk_root, conf->apk_repository, conf->apk_keys_dir))
+		{
+			fprintf(stderr, "ERROR: apk update failed\n");
+		}
+		return;
+	}
+
 	mkdir_p(conf->lists_dir, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH );
 
 	int is_gzip[2] = { 1, 0 };

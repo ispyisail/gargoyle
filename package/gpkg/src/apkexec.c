@@ -372,7 +372,7 @@ string_map* apk_manifest(const char* root, const char* keysdir, const char* file
 
 int apk_extract(const char* keysdir, const char* destdir, const char* file, int allow_untrusted)
 {
-	const char* argv[8];
+	const char* argv[9];
 	int i = 0;
 	apk_result* r;
 	int ok;
@@ -489,4 +489,32 @@ json_value* apk_adbdump_json(const char* file)
 	}
 	apk_result_free(r);
 	return result;
+}
+
+
+int apk_update_mainroot(const char* root, const char* repo, const char* keysdir)
+{
+	const char* argv[9];
+	int i = 0;
+	apk_result* r;
+	int ok;
+
+	argv[i++] = apk_bin_path();
+	argv[i++] = "update";
+	argv[i++] = "--root";
+	argv[i++] = root;
+	if(keysdir != NULL) { argv[i++] = "--keys-dir"; argv[i++] = keysdir; }
+	if(repo != NULL) { argv[i++] = "--repository"; argv[i++] = repo; }
+	argv[i++] = NULL;
+
+	r = apk_run(argv);
+	if(r == NULL) { return 0; }
+
+	ok = (r->exit_code == 0);
+	if(!ok)
+	{
+		fprintf(stderr, "apk_update_mainroot: %s\n", (r->err[0] != '\0') ? r->err : r->out);
+	}
+	apk_result_free(r);
+	return ok;
 }

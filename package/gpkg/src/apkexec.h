@@ -155,4 +155,13 @@ int apk_del_mainroot(const char* root, const char* pkg);
  * result and must json_free() it. */
 json_value* apk_adbdump_json(const char* file);
 
+/* `apk update --root <root> [--keys-dir <keysdir>] [--repository <repo>]`
+ * -- refreshes apk's own local index cache for the given repo. gpkg's
+ * `update` subcommand becomes a thin passthrough to this for the main
+ * root under GPKG_BACKEND=apk (every other dest's repo-listing view
+ * comes from a live `apk_query_json` call every time anyway, so there
+ * is nothing else to "refresh" the way the legacy backend's `lists_dir`
+ * download is needed for). Returns 1 on success, 0 on failure. */
+int apk_update_mainroot(const char* root, const char* repo, const char* keysdir);
+
 #endif
