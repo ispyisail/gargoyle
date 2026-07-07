@@ -26,15 +26,18 @@ set_version_variables()
 {
 
 	#openwrt branch
-	branch_name="24.10"
-	branch_id="openwrt-24.10"
-	packages_branch="openwrt-24.10"
+	branch_name="25.12"
+	branch_id="openwrt-25.12"
+	packages_branch="openwrt-25.12"
 
 
-	# set precise commit in repo to use 
-	# you can set this to an alternate commit 
+	# set precise commit in repo to use
+	# you can set this to an alternate commit
 	# or empty to checkout latest
-	openwrt_commit="95d0ca014c4ce5e225579f859c066dc74a20763b"
+	# pinned to the v25.12.5 tag's commit (not branch head) for
+	# reproducibility, same convention as the prior 24.10 pin -- see
+	# docs/openwrt-2512-bump-plan.md/-progress.md in gargoyle-tools
+	openwrt_commit="f0a60eee2fe051741c643ea6118718aae1ef17fb"
 	openwrt_abbrev_commit=$( echo "$openwrt_commit" | cut -b 1-7 )
 	
 
