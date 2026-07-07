@@ -4,11 +4,20 @@ string_map* parse_parameters(int argc, char** argv);
 
 void print_usage(void);
 
+int gpkg_backend = GPKG_BACKEND_OPKG;
+
+int gpkg_using_apk_backend(void)
+{
+	return gpkg_backend == GPKG_BACKEND_APK;
+}
+
 
 
 int main(int argc, char** argv)
 {
-	
+	char* backend_env = getenv("GPKG_BACKEND");
+	gpkg_backend = (backend_env != NULL && strcmp(backend_env, "apk") == 0) ? GPKG_BACKEND_APK : GPKG_BACKEND_OPKG;
+
 	string_map* parameters = parse_parameters(argc, argv);
 
 	opkg_conf *conf = load_conf((char*)get_string_map_element(parameters, "config"));
@@ -18,6 +27,7 @@ int main(int argc, char** argv)
 	int force_overwrite_configs      = get_string_map_element(parameters, "force-overwrite-configs") != NULL ? 1 : 0;
 	int force_depends                = get_string_map_element(parameters, "force-depends")           != NULL ? 1 : 0;
 	int force_reinstall              = get_string_map_element(parameters, "force-reinstall")         != NULL ? 1 : 0;
+	int allow_untrusted              = get_string_map_element(parameters, "allow-untrusted")          != NULL ? 1 : 0;
 
 	int remove_orphaned_depends      = get_string_map_element(parameters, "autoremove")                    != NULL ? REMOVE_ALL_ORPHANED_DEPENDENCIES : REMOVE_NO_ORPHANED_DEPENDENCIES;
 	remove_orphaned_depends          = get_string_map_element(parameters, "autoremove-same-destination")   != NULL ? REMOVE_ORPHANED_DEPENDENCIES_IN_SAME_DEST : remove_orphaned_depends;
@@ -44,7 +54,7 @@ int main(int argc, char** argv)
 
 	if(strcmp(run_type, "install") == 0)
 	{
-		do_install(conf, pkgs, install_root, link_root, 0, force_overwrite_configs, force_overwrite_other_files, force_reinstall, tmp_root);
+		do_install(conf, pkgs, install_root, link_root, 0, force_overwrite_configs, force_overwrite_other_files, force_reinstall, tmp_root, allow_untrusted);
 	}
 	else if(strcmp(run_type, "remove") == 0)
 	{
@@ -131,6 +141,8 @@ string_map* parse_parameters(int argc, char** argv)
 		{"regex",                   0, 0, 'r'},
 		{"package-variables",       1, 0, 'v'},
 		{"package_variables",       1, 0, 'v'},
+		{"allow-untrusted",         0, 0, 'u'},
+		{"allow_untrusted",         0, 0, 'u'},
 		{"help",                    0, 0, 'h'},
 		{NULL, 0, NULL, 0}
 	};
@@ -139,7 +151,7 @@ string_map* parse_parameters(int argc, char** argv)
 
 	int option_index = 0;
 	int c;
-	while ((c = getopt_long(argc, argv, "pwmeasc:d:l:n:t:o:rv:h", long_options, &option_index)) != -1)
+	while ((c = getopt_long(argc, argv, "pwmeasc:d:l:n:t:o:rv:hu", long_options, &option_index)) != -1)
 	{
 		switch(c)
 		{
@@ -206,9 +218,14 @@ string_map* parse_parameters(int argc, char** argv)
 				}
 				break;
 
-			case 'r': 
+			case 'r':
 				//--matching-regex, or just --regex
 				expect_regex = 1;
+				break;
+			case 'u':
+				//--allow-untrusted: GPKG_BACKEND=apk only (Phase 6, local-file
+				//install support) -- ignored entirely by the legacy backend.
+				set_string_map_element(parameters, "allow-untrusted", strdup("D"));
 				break;
 			case 'h':
 			default:
@@ -360,6 +377,8 @@ void print_usage(void)
 	printf("                                automatically to satisfy dependencies\n");
 	printf("                                only if they were installed to same\n");
 	printf("                                destination as package being removed\n");
+	printf("  --allow-untrusted,-u          Install an unsigned/untrusted local package\n");
+	printf("                                file (GPKG_BACKEND=apk only)\n");
 
 
 	

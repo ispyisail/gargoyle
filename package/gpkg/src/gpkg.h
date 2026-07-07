@@ -24,6 +24,7 @@
 #include <erics_tools.h>
 #include <bbtargz.h>
 #include <ewget.h>
+#include "json.h"
 
 #if __SIZEOF_POINTER__ == 8
 	#define SCANFU64 "%lu"
@@ -86,6 +87,17 @@
 
 
 
+/* gapk re-backend switch (see docs/gapk-implementation-plan.md in
+ * gargoyle-tools): GPKG_BACKEND=apk in the environment selects the new
+ * apk-sourced code paths added starting Phase 3; anything else (unset,
+ * or any other value) runs the original opkg-format paths, unchanged.
+ * gpkg_backend is set once, early in main(), and read (never written)
+ * everywhere else. */
+#define GPKG_BACKEND_OPKG 0
+#define GPKG_BACKEND_APK  1
+extern int gpkg_backend;
+int gpkg_using_apk_backend(void);
+
 /* conf defs/prototypes */
 typedef struct opkg_conf_struct
 {
@@ -100,6 +112,13 @@ typedef struct opkg_conf_struct
 	string_map* dest_names;
 	string_map* dest_freespace;
 	string_map* dest_totalspace;
+
+	/* apk backend connection info (GPKG_BACKEND=apk only; unused and
+	 * left NULL/default otherwise). Parsed from the same conf file as
+	 * everything else so both backends' config lives in one place. */
+	char* apk_root;        /* default "/" if unset */
+	char* apk_repository;  /* path to an APKINDEX.adb; NULL = none configured */
+	char* apk_keys_dir;    /* MUST be absolute if set -- see apkexec.h */
 } opkg_conf;
 
 opkg_conf* load_conf(const char* conf_file_name);
@@ -125,6 +144,8 @@ char** alloc_depend_def(char* def_version_str);
 
 void load_all_package_data(opkg_conf* conf, string_map* package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, char* install_root, int ignore_recursive_variables, string_map* preferred_provides);
 void load_package_data(char* data_source, int source_is_dir, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, char* dest_name, string_map* preferred_provides);
+void load_package_data_apk(opkg_conf* conf, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, string_map* preferred_provides);
+char* join_json_string_array(json_value* arr, const char* sep);
 int load_recursive_package_data_variables(string_map* package_data, char* package, int load_size, int load_will_fit, uint64_t free_bytes);
 
 
@@ -157,13 +178,15 @@ void update(opkg_conf* conf);
 /* remove.c */
 void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remove_orphaned_depends, int force, int warn_if_forced, char* tmp_root);
 void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* package_data, char* tmp_dir, int save_conf_files, int is_orphaned_dependency);
+void remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orphaned_dependency);
 int run_script_if_exists(char* install_root_path, char* install_link_path, char* pkg_name, char* script_type_postfix, char* action_arg);
 
 /* install.c */
 void cp(char* src, char* dst);
 int create_dir_and_test_writable(char* dir);
-void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char* link_root_name, int is_upgrade, int overwrite_config, int overwrite_other_package_files, int force_reinstall, char* tmp_root);
-int recursively_install(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_config, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs);
+void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char* link_root_name, int is_upgrade, int overwrite_config, int overwrite_other_package_files, int force_reinstall, char* tmp_root, int allow_untrusted);
+int recursively_install(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_config, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs, int allow_untrusted);
+int recursively_install_apk(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs, int allow_untrusted);
 
 /* upgrade.c */
 void do_upgrade(opkg_conf* conf, string_map* pkgs, int preserve_conf_files, char* install_root_name, char* link_root, char* tmp_root);

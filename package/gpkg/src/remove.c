@@ -1,6 +1,7 @@
 
 
 #include "gpkg.h"
+#include "apkexec.h"
 
 
 
@@ -323,14 +324,66 @@ void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remov
 
 }
 
+/* GPKG_BACKEND=apk counterpart to remove_individual_package() -- see
+ * docs/gapk-implementation-plan.md Phase 5 in gargoyle-tools. The main
+ * root's files were never placed via gpkg's own .list/.linked/control-
+ * file mechanism to begin with (Phase 4's recursively_install_apk()
+ * delegates the whole main-root install to apk_add_mainroot, which
+ * writes only its own db, not gpkg's per-package control files) -- so
+ * removal has to go through apk too, or nothing would actually get
+ * removed (the legacy list-file-driven logic would just find no files
+ * to touch and silently no-op). gpkg's own bookkeeping status entry for
+ * this dest is reconciled by the completely unchanged do_remove() status-
+ * file code that calls this function, exactly as it already is for
+ * every dest, backend or not.
+ *
+ * --autoremove-same-dest for the main root becomes a harmless no-op by
+ * construction, not by any special-casing here: apk_del_mainroot always
+ * auto-purges its own orphans as part of the SAME `apk del` call
+ * (confirmed live in Phase 2), so by the time do_remove()'s own orphan-
+ * detection loop reloads fresh data via load_package_data_apk() (Phase
+ * 3), any main-root dependency apk already purged no longer shows
+ * status:["installed"] in that fresh query -- gpkg's own orphan search
+ * (which only considers packages still `dep_is_installed`) simply never
+ * queues it for its own removal pass. See goldens/ALLOWLIST.md. */
+void remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orphaned_dependency)
+{
+	int ok;
+
+	if(is_orphaned_dependency)
+	{
+		printf("Removing orphaned dependency %s...\n", pkg_name);
+	}
+	else
+	{
+		printf("Removing package %s...\n", pkg_name);
+	}
+
+	ok = apk_del_mainroot(conf->apk_root, pkg_name);
+	if(!ok)
+	{
+		fprintf(stderr, "ERROR: apk failed to remove package %s from the main root\n", pkg_name);
+	}
+
+	printf("Finished removing %s.\n\n", pkg_name);
+}
+
+
 void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* package_data, char* tmp_dir, int save_conf_files, int is_orphaned_dependency)
 {
 	string_map* install_pkg_data    = get_package_current_or_latest(package_data, pkg_name, NULL, NULL);
 
 	char* install_root_name         = get_string_map_element(install_pkg_data, "Install-Destination");
 	char* install_root_path         = get_string_map_element(conf->dest_names, install_root_name);
+
+	if(gpkg_using_apk_backend() && install_root_path != NULL && safe_strcmp(install_root_path, conf->apk_root) == 0)
+	{
+		remove_individual_package_apk(pkg_name, conf, is_orphaned_dependency);
+		return;
+	}
+
 	char* link_root_name            = get_string_map_element(install_pkg_data, "Link-Destination");
-	char* link_root_path            = link_root_name != NULL ? get_string_map_element(conf->dest_names, install_root_name) : NULL;
+	char* link_root_path            = link_root_name != NULL ? get_string_map_element(conf->dest_names, link_root_name) : NULL;
 	char* control_postfix_list[]    = { "control", "list",  "linked", "conffiles", "prerm", "postrm", "preinst", "postinst", NULL };
 	list* pkg_alternatives			= get_string_map_element(install_pkg_data, "Alternatives");
 

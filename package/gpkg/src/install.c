@@ -1,6 +1,8 @@
 
 
 #include "gpkg.h"
+#include "json.h"
+#include "apkexec.h"
 
 int create_dir_and_test_writable(char* dir)
 {
@@ -53,7 +55,7 @@ void cp(char* src_path, char* dst_path)
 
 
 //void do_install(opkg_conf* conf, char* pkg_name, char* install_root_name, char* link_root_name, char** version_criteria)
-void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char* link_root_name, int is_upgrade, int overwrite_config, int overwrite_other_package_files, int force_reinstall, char* tmp_root)
+void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char* link_root_name, int is_upgrade, int overwrite_config, int overwrite_other_package_files, int force_reinstall, char* tmp_root, int allow_untrusted)
 {
 	string_map* package_data = initialize_string_map(1);
 	string_map* matching_packages = initialize_string_map(1);
@@ -128,7 +130,101 @@ void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char
 
 		
 		/* deal with case where we're installing from file */
-		if(path_exists(pkg_name))
+		if(path_exists(pkg_name) && gpkg_using_apk_backend())
+		{
+			/* GPKG_BACKEND=apk counterpart to the legacy from-file block
+			 * just below (see docs/gapk-implementation-plan.md Phase 6
+			 * in gargoyle-tools). Control data comes from
+			 * apk_adbdump_json instead of deb_extract+load_package_data
+			 * -- note apk_query_json does NOT work for a bare local file
+			 * target (tried live: returns an empty array even with a db
+			 * context and matching keysdir -- the plan's own prototype
+			 * note conflated this with manifest's confirmed file-target
+			 * support). adbdump's fields live one level deeper, under an
+			 * "info" object, unlike apk_query_json's flat per-package
+			 * objects -- a real, easy-to-miss structural difference
+			 * between the two JSON shapes.
+			 *
+			 * The @@_FILE_INSTALL_VERSION_@@ version-collision hack is
+			 * kept unchanged (same reason it exists for the legacy path:
+			 * avoid colliding with a same-named feed-index entry) --
+			 * placement itself then goes through recursively_install_apk
+			 * exactly like a repo-resolved package would, since
+			 * Install-File-Location is set the same way. */
+			char* pkg_file = pkg_name;
+			json_value* meta = apk_adbdump_json(pkg_file);
+			json_value* info = meta != NULL ? json_get(meta, "info") : NULL;
+			const char* real_name = json_str(json_get(info, "name"));
+			const char* real_version = json_str(json_get(info, "version"));
+
+			if(info == NULL || real_name == NULL || real_version == NULL)
+			{
+				fprintf(stderr, "ERROR: %s is not a valid package file, cannot install\n", pkg_file);
+				if(meta != NULL) { json_free(meta); }
+				rm_r(tmp_dir);
+				exit(1);
+			}
+
+			pkg_name = strdup(real_name);
+
+			string_map* pkg_info = initialize_string_map(1);
+			set_string_map_element(pkg_info, "Install-File-Location", strdup(pkg_file));
+			set_string_map_element(pkg_info, "Version", strdup(real_version));
+			set_string_map_element(pkg_info, "Source-ID", strdup("apk"));
+			set_string_map_element(pkg_info, "Install-Destination", strdup(NOT_INSTALLED_STRING));
+			/* add_package_data() defaults this for every legacy-path
+			 * entry (see its own "if Status is not defined" comment);
+			 * this pkg_info is built fresh rather than routed through
+			 * add_package_data (there's no per-line text parse here to
+			 * drive it), so the default has to be set explicitly. */
+			set_string_map_element(pkg_info, "Status", strdup("unknown ok not-installed"));
+			{
+				char* joined = join_json_string_array(json_get(info, "depends"), ", ");
+				if(joined != NULL) { set_string_map_element(pkg_info, "Depends", joined); }
+			}
+			{
+				char* joined = join_json_string_array(json_get(info, "provides"), ", ");
+				if(joined != NULL) { set_string_map_element(pkg_info, "Provides", joined); }
+			}
+			{
+				long isize;
+				if(json_int(json_get(info, "installed-size"), &isize))
+				{
+					char buf[32];
+					snprintf(buf, sizeof(buf), "%ld", isize);
+					set_string_map_element(pkg_info, "Installed-Size", strdup(buf));
+				}
+			}
+			{
+				const char* desc = json_str(json_get(info, "description"));
+				if(desc != NULL) { set_string_map_element(pkg_info, "Description", strdup(desc)); }
+			}
+
+			char* special_version = dynamic_strcat(2, (char*)real_version, "@@_FILE_INSTALL_VERSION_@@");
+			char** new_version_criteria = malloc(3*sizeof(char*));
+			new_version_criteria[0] = strdup("=");
+			new_version_criteria[1] = special_version;
+			new_version_criteria[2] = NULL;
+			version_criteria = new_version_criteria;
+
+			string_map* all_current_versions = get_string_map_element(package_data, pkg_name);
+			if(all_current_versions == NULL)
+			{
+				all_current_versions = initialize_string_map(1);
+				set_string_map_element(package_data, pkg_name, all_current_versions);
+			}
+			set_string_map_element(all_current_versions, special_version, pkg_info);
+			set_string_map_element(all_current_versions, LATEST_VERSION_STRING, special_version);
+
+			free(pkg_names[pkg_name_index]);
+			pkg_names[pkg_name_index] = strdup(pkg_name);
+
+			set_string_map_element(pkgs, pkg_name, copy_null_terminated_string_array(new_version_criteria));
+			set_string_map_element(pkgs_from_file, pkg_name, strdup("D"));
+
+			json_free(meta);
+		}
+		else if(path_exists(pkg_name))
 		{
 			//installing from file
 			char* pkg_file = pkg_name;
@@ -405,7 +501,7 @@ void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char
 				do_remove(conf, rm_pkg, (overwrite_config ? 0 : 1), 0, 1, 0, tmp_root);
 				
 				//restart install
-				return do_install(conf, pkgs, install_root_name, link_root_name, is_upgrade, overwrite_config, overwrite_other_package_files, force_reinstall, tmp_root);
+				return do_install(conf, pkgs, install_root_name, link_root_name, is_upgrade, overwrite_config, overwrite_other_package_files, force_reinstall, tmp_root, allow_untrusted);
 				
 			}
 			else
@@ -555,7 +651,7 @@ void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char
 			char* install_pkg_version = NULL;
 			char** version_criteria = get_string_map_element(pkgs, pkg_name);
 			get_package_current_or_latest_matching_and_satisfiable(package_data, pkg_name, version_criteria, &install_pkg_is_current, &install_pkg_version);
-			err = recursively_install(pkg_name, install_pkg_version, install_root_name, link_root_name, overlay_path, is_upgrade, overwrite_config, overwrite_other_package_files, tmp_dir, conf, package_data, install_called_pkgs);
+			err = recursively_install(pkg_name, install_pkg_version, install_root_name, link_root_name, overlay_path, is_upgrade, overwrite_config, overwrite_other_package_files, tmp_dir, conf, package_data, install_called_pkgs, allow_untrusted);
 		
 			free_if_not_null(install_pkg_version);
 		}
@@ -622,10 +718,364 @@ void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char
 }
 
 
-int recursively_install(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_config, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs)
+/* GPKG_BACKEND=apk counterpart to recursively_install() -- see
+ * docs/gapk-implementation-plan.md Phase 4 in gargoyle-tools and the
+ * two-path ownership table there (main root vs. every other dest).
+ * Called from a single early-return branch at the top of the legacy
+ * recursively_install(), which is otherwise completely untouched.
+ *
+ * Main root (install_root_path == conf->apk_root): the whole placement
+ * is delegated to apk_add_mainroot -- apk fetches, verifies, extracts,
+ * and runs scripts natively in one call. gpkg's own bookkeeping status
+ * entry for this package is written by the UNCHANGED code in
+ * do_install() that calls this function (lines ~497-539/585-621) --
+ * exactly as it already is for every other dest, backend or not; only
+ * the file *placement* mechanism differs here.
+ *
+ * Every other dest: gpkg drives placement itself, mirroring the
+ * legacy function's own step sequence but sourcing each step from apk
+ * instead of deb_extract:
+ *   apk_fetch                              (replaces the download/
+ *                                            local-file src_file_path
+ *                                            resolution + md5/sha256
+ *                                            check -- apk_fetch/
+ *                                            apk_extract already
+ *                                            enforce the package's
+ *                                            signature themselves)
+ *   apk_manifest                           (replaces
+ *                                            deb_extract(...,extract_list))
+ *   apk_adbdump_json's "scripts" object    (replaces
+ *                                            deb_extract(...,extract_control_tar_gz)
+ *                                            for preinst/postinst --
+ *                                            apk_extract deliberately
+ *                                            never places or runs
+ *                                            scripts, found live while
+ *                                            building this phase; see
+ *                                            apkexec.h's own doc
+ *                                            comment)
+ *   [conflict-check + files_to_link precompute -- same logic as the
+ *    legacy 838-918 block, just reading manifest paths instead of a
+ *    deb_extract-produced list file]
+ *   run_script_if_exists(...,"preinst",...)  -- UNCHANGED call
+ *   apk_extract                              (replaces
+ *                                              deb_extract(...,extract_data_tar_gz))
+ *   [symlink pass -- UNCHANGED logic, same as legacy 956-983]
+ *   run_script_if_exists(...,"postinst",...) -- UNCHANGED call
+ *
+ * Known, deliberate scope limitation (documented, not a bug): apk's
+ * ADB metadata has no per-file "this is a config file, preserve edits"
+ * marking the way an opkg .conffiles control file does, so the
+ * conf_files/copied_conf_files preservation-across-reinstall behavior
+ * legacy's recursively_install has is simply not implemented here --
+ * every file this function places always overwrites what's on disk
+ * (still guarded by the same file-already-exists conflict check
+ * everything else in this codebase uses). Revisit only if a real need
+ * for apk-backend config-file preservation surfaces later; out of
+ * Phase 4's own scope. Alternatives handling (update_alternatives) is
+ * likewise not wired in here yet -- no fixture package in the gapk
+ * labs declares any, so it's untested territory; add it alongside a
+ * real test case if/when needed rather than guessing at the shape now. */
+int recursively_install_apk(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs, int allow_untrusted)
 {
+	int err = 0;
+
+	/* variables not allocated in this function, do not need to be freed */
+	string_map* install_pkg_data = get_package_with_version(package_data, pkg_name, pkg_version);
+	string_map* pkg_dependencies = get_string_map_element(install_pkg_data, "Required-Depends");
+	char* src_file_path           = get_string_map_element(install_pkg_data, "Install-File-Location");
+	char* install_root_path      = get_string_map_element(conf->dest_names, install_root_name);
+	char* link_root_path         = link_to_root != NULL && safe_strcmp(link_to_root, install_root_name) != 0 ? get_string_map_element(conf->dest_names, link_to_root) : NULL;
+
+	set_string_map_element(install_called_pkgs, pkg_name, strdup("D"));
+
+	/* recurse dependencies -- same pattern as legacy recursively_install */
+	if(pkg_dependencies != NULL)
+	{
+		unsigned long num_deps;
+		char** deps = get_string_map_keys(pkg_dependencies, &num_deps);
+		int dep_index;
+		for(dep_index = 0; err == 0 && dep_index < num_deps; dep_index++)
+		{
+			if(get_string_map_element(install_called_pkgs, deps[dep_index]) == NULL)
+			{
+				char** dep_def = get_string_map_element(pkg_dependencies, deps[dep_index]);
+				int is_current;
+				char* matching_version;
+				string_map* dep_pkg = get_package_current_or_latest_matching_and_satisfiable(package_data, deps[dep_index], dep_def, &is_current, &matching_version);
+				if(dep_pkg != NULL)
+				{
+					char* dep_status = get_string_map_element(dep_pkg, "Status");
+					if(strstr(dep_status, " half-installed") != NULL)
+					{
+						err = recursively_install_apk(deps[dep_index], matching_version, install_root_name, link_to_root, overlay_path, is_upgrade, overwrite_other_package_files, tmp_dir, conf, package_data, install_called_pkgs, allow_untrusted);
+					}
+				}
+				else
+				{
+					err = 1;
+				}
+			}
+		}
+		free_null_terminated_string_array(deps);
+	}
+
+	if(install_root_path == NULL)
+	{
+		err = 1;
+	}
+	if(err == 0)
+	{
+		printf("Preparing to install package %s...\n", pkg_name);
+	}
+
+	if(err == 0 && safe_strcmp(install_root_path, conf->apk_root) == 0)
+	{
+		/* main root: apk owns fetch/verify/extract/scripts/db entirely.
+		 * A local-file install (src_file_path set, Phase 6) passes the
+		 * file path itself with local_file=1 instead of a name=version
+		 * spec -- apk_add_mainroot needs --force-non-repository for
+		 * that case (see its own doc comment in apkexec.h). */
+		int local_file = src_file_path != NULL;
+		char* version_spec = local_file ? strdup(src_file_path) : dynamic_strcat(3, pkg_name, "=", pkg_version);
+		err = apk_add_mainroot(conf->apk_root, conf->apk_repository, conf->apk_keys_dir, NULL, 0, 0, allow_untrusted, local_file, version_spec) ? 0 : 1;
+		if(err)
+		{
+			fprintf(stderr, "ERROR: apk failed to install package %s into the main root\n", pkg_name);
+		}
+		free(version_spec);
+	}
+	else if(err == 0)
+	{
+		char* base_fetch_dir = dynamic_strcat(2, tmp_dir, "/apk-fetch");
+		char* pkg_dest = NULL;
+		string_map* manifest = NULL;
+		string_map* files_to_link = NULL;
+		char* info_dir;
+		char* control_name_prefix;
+		char* list_file_name;
+		int install_root_len = strlen(install_root_path);
+		char* fs_terminated_install_root = install_root_path[install_root_len-1] == '/' ? strdup(install_root_path) : dynamic_strcat(2, install_root_path, "/");
+		char* fs_terminated_overlay_root;
+		char* fs_terminated_link_root = NULL;
+
+		if(overlay_path != NULL)
+		{
+			int overlay_root_len = strlen(overlay_path);
+			fs_terminated_overlay_root = overlay_path[overlay_root_len-1] == '/' ? strdup(overlay_path) : dynamic_strcat(2, overlay_path, "/");
+		}
+		else
+		{
+			fs_terminated_overlay_root = strdup(fs_terminated_install_root);
+		}
+		if(link_root_path != NULL)
+		{
+			int link_root_len = strlen(link_root_path);
+			fs_terminated_link_root = link_root_path[link_root_len-1] == '/' ? strdup(link_root_path) : dynamic_strcat(2, link_root_path, "/");
+		}
+
+		/* Local-file install (src_file_path set, Phase 6): the file is
+		 * already on disk, no apk_fetch needed -- mirrors legacy
+		 * recursively_install's own src_file_path bypass of its
+		 * download step. */
+		if(src_file_path != NULL)
+		{
+			pkg_dest = strdup(src_file_path);
+		}
+		else
+		{
+			mkdir_p(base_fetch_dir, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+			pkg_dest = apk_fetch(conf->apk_root, conf->apk_repository, conf->apk_keys_dir, base_fetch_dir, pkg_name);
+		}
+		err = pkg_dest == NULL ? 1 : 0;
+		if(err)
+		{
+			fprintf(stderr, "ERROR: could not fetch package %s via apk\n", pkg_name);
+		}
+		else
+		{
+			printf("\tFetched %s successfully.\n\tInstalling %s...\n", pkg_name, pkg_name);
+			manifest = apk_manifest(conf->apk_root, conf->apk_keys_dir, pkg_dest, allow_untrusted);
+			err = manifest == NULL ? 1 : 0;
+			if(err)
+			{
+				fprintf(stderr, "ERROR: could not read file manifest for package %s\n", pkg_name);
+			}
+		}
+
+		info_dir            = dynamic_strcat(2, fs_terminated_overlay_root, "usr/lib/opkg/info");
+		control_name_prefix = dynamic_strcat(4, info_dir, "/", pkg_name, ".");
+		list_file_name      = dynamic_strcat(4, info_dir, "/", pkg_name, ".list");
+
+		if(err == 0)
+		{
+			json_value* meta;
+
+			mkdir_p(info_dir, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+
+			/* scripts (if any) -- replaces the legacy control.tar.gz
+			 * extraction for preinst/postinst; see this function's own
+			 * doc comment above. */
+			meta = apk_adbdump_json(pkg_dest);
+			if(meta != NULL)
+			{
+				json_value* scripts = json_get(meta, "scripts");
+				const char* preinst_src  = json_str(json_get(scripts, "pre-install"));
+				const char* postinst_src = json_str(json_get(scripts, "post-install"));
+				if(preinst_src != NULL)
+				{
+					char* p = dynamic_strcat(2, control_name_prefix, "preinst");
+					FILE* f = fopen(p, "w");
+					if(f != NULL)
+					{
+						fputs(preinst_src, f);
+						fclose(f);
+						chmod(p, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+					}
+					free(p);
+				}
+				if(postinst_src != NULL)
+				{
+					char* p = dynamic_strcat(2, control_name_prefix, "postinst");
+					FILE* f = fopen(p, "w");
+					if(f != NULL)
+					{
+						fputs(postinst_src, f);
+						fclose(f);
+						chmod(p, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+					}
+					free(p);
+				}
+				json_free(meta);
+			}
+
+			/* list file + conflict-check + files_to_link, fed from the
+			 * manifest instead of a deb_extract-produced list file --
+			 * same logic/output shape as the legacy 838-918 block. */
+			{
+				unsigned long num_paths;
+				char** manifest_paths = get_string_map_keys(manifest, &num_paths);
+				FILE* list_file = fopen(list_file_name, "w");
+				int path_index;
+
+				for(path_index = 0; path_index < num_paths && !err; path_index++)
+				{
+					char* rel_path = manifest_paths[path_index];
+					char* adjusted_file_path = dynamic_strcat(2, fs_terminated_install_root, rel_path);
+
+					err = path_exists(adjusted_file_path) && overwrite_other_package_files == 0 ? 1 : 0;
+					if(err)
+					{
+						fprintf(stderr, "ERROR: file '%s'\n", adjusted_file_path);
+						fprintf(stderr, "       from package %s already exists.\n\n", pkg_name);
+					}
+					else
+					{
+						fprintf(list_file, "%s\n", adjusted_file_path);
+						if(link_root_path != NULL)
+						{
+							char* link_to_path = dynamic_strcat(2, fs_terminated_link_root, rel_path);
+							files_to_link = files_to_link == NULL ? initialize_string_map(1) : files_to_link;
+							set_string_map_element(files_to_link, adjusted_file_path, link_to_path);
+						}
+					}
+					free(adjusted_file_path);
+				}
+				fclose(list_file);
+				free_null_terminated_string_array(manifest_paths);
+			}
+		}
+
+		if(err == 0)
+		{
+			err = run_script_if_exists(install_root_path, link_root_path, pkg_name, "preinst", (is_upgrade ? "upgrade" : "install"));
+		}
+
+		if(err == 0)
+		{
+			int extract_ok = apk_extract(conf->apk_keys_dir, fs_terminated_overlay_root, pkg_dest, allow_untrusted);
+			err = extract_ok ? 0 : 1;
+			if(err)
+			{
+				fprintf(stderr, "ERROR: apk could not extract application files from package %s.\n", pkg_name);
+			}
+		}
+
+		if(err == 0 && files_to_link != NULL)
+		{
+			unsigned long num_files;
+			char** real_files = get_string_map_keys(files_to_link, &num_files);
+			if(num_files > 0)
+			{
+				char* link_file_name = dynamic_strcat(4, info_dir, "/", pkg_name, ".linked");
+				FILE* link_file = fopen(link_file_name, "w");
+				int file_index;
+				for(file_index = 0; link_file != NULL && file_index < num_files; file_index++)
+				{
+					char* link_path = get_string_map_element(files_to_link, real_files[file_index]);
+					if(!path_exists(link_path))
+					{
+						int sym_success;
+						mkdir_p(link_path, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+						rm_r(link_path);
+						sym_success = symlink(real_files[file_index], link_path);
+						fprintf(link_file, "%s\n", link_path);
+					}
+				}
+				if(link_file != NULL) { fclose(link_file); }
+				free(link_file_name);
+			}
+			destroy_string_map(files_to_link, DESTROY_MODE_FREE_VALUES, &num_files);
+			free_null_terminated_string_array(real_files);
+			files_to_link = NULL;
+		}
+
+		if(err == 0)
+		{
+			int warn = run_script_if_exists(install_root_path, link_root_path, pkg_name, "postinst", (is_upgrade ? "upgrade" : "install"));
+			if(warn != 0)
+			{
+				fprintf(stderr, "Warning: postinstall script failed for package %s.\n", pkg_name);
+			}
+		}
+
+		if(err == 0)
+		{
+			printf("\tSuccessfully installed %s.\n", pkg_name);
+		}
+
+		free_if_not_null(pkg_dest);
+		free_if_not_null(info_dir);
+		free_if_not_null(control_name_prefix);
+		free_if_not_null(list_file_name);
+		free_if_not_null(fs_terminated_install_root);
+		free_if_not_null(fs_terminated_overlay_root);
+		free_if_not_null(fs_terminated_link_root);
+		free_if_not_null(base_fetch_dir);
+		if(files_to_link != NULL)
+		{
+			unsigned long num_destroyed;
+			destroy_string_map(files_to_link, DESTROY_MODE_FREE_VALUES, &num_destroyed);
+		}
+		if(manifest != NULL)
+		{
+			unsigned long num_destroyed;
+			destroy_string_map(manifest, DESTROY_MODE_FREE_VALUES, &num_destroyed);
+		}
+	}
+
+	return err;
+}
+
+
+int recursively_install(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_config, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs, int allow_untrusted)
+{
+	if(gpkg_using_apk_backend())
+	{
+		return recursively_install_apk(pkg_name, pkg_version, install_root_name, link_to_root, overlay_path, is_upgrade, overwrite_other_package_files, tmp_dir, conf, package_data, install_called_pkgs, allow_untrusted);
+	}
+
 	int err=0;
-	
+
 	/* variables not allocated in this function, do not need to be freed */
 	string_map* install_pkg_data    = get_package_with_version(package_data, pkg_name, pkg_version);
 	char* src_file_path             = get_string_map_element(install_pkg_data, "Install-File-Location");
@@ -692,7 +1142,7 @@ int recursively_install(char* pkg_name, char* pkg_version, char* install_root_na
 					char* dep_status = get_string_map_element(dep_pkg, "Status");
 					if(strstr(dep_status, " half-installed") != NULL)
 					{
-						err = recursively_install(deps[dep_index], matching_version, install_root_name, link_to_root, overlay_path, is_upgrade, overwrite_config, overwrite_other_package_files, tmp_dir, conf, package_data, install_called_pkgs);
+						err = recursively_install(deps[dep_index], matching_version, install_root_name, link_to_root, overlay_path, is_upgrade, overwrite_config, overwrite_other_package_files, tmp_dir, conf, package_data, install_called_pkgs, allow_untrusted);
 						
 					}
 				}
@@ -870,15 +1320,9 @@ int recursively_install(char* pkg_name, char* pkg_version, char* install_root_na
 				if(list_file_lines[line_index][0] == '.' && list_file_lines[line_index][1] == '/' && list_file_lines[line_index][line_len-1] != '/')
 				{
 					char* adjusted_file_path = dynamic_strcat(2, fs_terminated_install_root, list_file_lines[line_index] + 2);
-					int is_conf_file = conf_files != NULL ? 
-								(get_string_map_element(conf_files, adjusted_file_path) != NULL ? 1 : 0) : 
+					int is_conf_file = conf_files != NULL ?
+								(get_string_map_element(conf_files, adjusted_file_path) != NULL ? 1 : 0) :
 								0;
-					if(strcmp(pkg_name, "opkg") == 0 && strcmp(list_file_lines[line_index], "./bin/opkg") == 0 && path_exists("/bin/opkg") == PATH_IS_SYMLINK)
-					{
-						//very special case: we're installing opkg, and here all the preliminary checks have already been passed
-						//remove symlink placeholder to gpkg from /bin/opkg if it exists
-						rm_r("/bin/opkg");
-					}
 					err = path_exists(adjusted_file_path) && is_conf_file == 0 && overwrite_other_package_files == 0 ? 1 : 0;
 					if(err)
 					{

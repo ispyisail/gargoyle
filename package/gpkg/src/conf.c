@@ -20,6 +20,13 @@ opkg_conf* load_conf(const char* conf_file_name)
 
 	conf->lists_dir = strdup("/usr/lib/opkg/lists");
 
+	/* apk backend connection info (GPKG_BACKEND=apk only) -- see
+	 * docs/gapk-implementation-plan.md Phase 3 in gargoyle-tools.
+	 * Defaults are inert for the legacy opkg backend. */
+	conf->apk_root       = strdup("/");
+	conf->apk_repository = NULL;
+	conf->apk_keys_dir   = NULL;
+
 	FILE* conf_file =  fopen(dupe_conf_file_name, "r");
 	int read_data = 1;
 	char next_line[1024];
@@ -74,6 +81,21 @@ opkg_conf* load_conf(const char* conf_file_name)
 					free(conf->lists_dir);
 					conf->lists_dir = strdup(split_line[num_pieces-1]);
 				}
+				else if(strcmp(split_line[0], "apk_root") == 0 && num_pieces >= 2)
+				{
+					free(conf->apk_root);
+					conf->apk_root = strdup(split_line[num_pieces-1]);
+				}
+				else if(strcmp(split_line[0], "apk_repository") == 0 && num_pieces >= 2)
+				{
+					free_if_not_null(conf->apk_repository);
+					conf->apk_repository = strdup(split_line[num_pieces-1]);
+				}
+				else if(strcmp(split_line[0], "apk_keys_dir") == 0 && num_pieces >= 2)
+				{
+					free_if_not_null(conf->apk_keys_dir);
+					conf->apk_keys_dir = strdup(split_line[num_pieces-1]);
+				}
 				else if(strcmp(split_line[0], "src/gz") == 0)
 				{
 					set_string_map_element(conf->gzip_sources, split_line[num_pieces-2], strdup(split_line[num_pieces-1]));
@@ -111,6 +133,9 @@ void free_conf(opkg_conf* conf)
 {
 	unsigned long num_freed;
 	free(conf->lists_dir);
+	free(conf->apk_root);
+	free_if_not_null(conf->apk_repository);
+	free_if_not_null(conf->apk_keys_dir);
 
 	destroy_string_map(conf->gzip_sources,    DESTROY_MODE_FREE_VALUES, &num_freed);
 	destroy_string_map(conf->plain_sources,   DESTROY_MODE_FREE_VALUES, &num_freed);

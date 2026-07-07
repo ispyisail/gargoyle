@@ -1,5 +1,7 @@
 
 #include "gpkg.h"
+#include "json.h"
+#include "apkexec.h"
 
 int include_variable(char* var, int package_matches, int include_package, int load_variable_def, string_map* load_variable_map);
 int sort_version_cmp_internal(const void *a, const void *b);
@@ -71,7 +73,14 @@ void load_all_package_data(opkg_conf* conf, string_map* package_data, string_map
 
 	// load list data
 	// this tells us everything about packages except whether they are currently installed
-	load_package_data(conf->lists_dir, 1, package_data, matching_packages, parameters, load_variable_def, NULL, preferred_provides);
+	if(gpkg_using_apk_backend())
+	{
+		load_package_data_apk(conf, package_data, matching_packages, parameters, load_variable_def, preferred_provides);
+	}
+	else
+	{
+		load_package_data(conf->lists_dir, 1, package_data, matching_packages, parameters, load_variable_def, NULL, preferred_provides);
+	}
 
 	//load control / status data
 	unsigned long num_dests;
@@ -994,6 +1003,251 @@ void load_package_data(char* data_source, int source_is_dir, string_map* existin
 	free(all_dummy);
 	free(matching_dummy);
 }
+
+
+/* Joins a JSON array of strings (e.g. apk's "depends"/"provides"
+ * fields) into a single ", "-separated string in the same shape a
+ * legacy opkg Packages file's own Depends/Provides line would have
+ * (space/comma-separated tokens) -- so the EXISTING split_on_separators
+ * -based parsing everywhere else in this file (see e.g. the "Depends"
+ * handling around line 1120 and add_package_data's "Provides" handling)
+ * keeps working unmodified on apk-sourced data. Returns NULL (not an
+ * empty string) if arr is NULL/absent/empty, matching how a legacy
+ * Packages file simply omits a field with nothing to say -- callers
+ * should leave the gpkg key unset in that case, not set it to "". Any
+ * non-string array element is skipped. Caller owns the returned string.
+ * Not static: install.c's local-.apk-file install path (Phase 6) reuses
+ * this for apk_adbdump_json's "info.depends"/"info.provides" arrays,
+ * which need the exact same join treatment as apk_query_json's flat
+ * per-package "depends"/"provides" fields do. */
+char* join_json_string_array(json_value* arr, const char* sep)
+{
+	unsigned long i;
+	unsigned long n = json_arr_len(arr);
+	char* result = NULL;
+
+	for(i = 0; i < n; i++)
+	{
+		const char* s = json_str(json_arr_get(arr, i));
+		if(s == NULL) { continue; }
+
+		if(result == NULL)
+		{
+			result = strdup(s);
+		}
+		else
+		{
+			char* tmp = dynamic_strcat(3, result, sep, s);
+			free(result);
+			result = tmp;
+		}
+	}
+	return result;
+}
+
+
+/* GPKG_BACKEND=apk counterpart to load_package_data(conf->lists_dir, 1,
+ * ...) -- the repo-listing half of load_all_package_data's two data
+ * sources. Populates existing_package_data/matching_packages from
+ * conf->apk_repository via apk_query_json's glob-all-packages query
+ * instead of parsing opkg Packages/Packages.gz files. Deliberately does
+ * NOT touch per-dest control/status loading (the OTHER half of
+ * load_all_package_data, just below this call in the caller) -- gpkg
+ * keeps writing and reading its own opkg-format bookkeeping records
+ * for every dest regardless of backend (see docs/gapk-implementation-
+ * plan.md's Phase 3 spec and the two-path ownership table in Phase 4),
+ * so that loop is 100% unchanged and this function never sets "Status"
+ * itself, exactly like the legacy repo-listing load never does either
+ * (a real opkg Packages/feed file has no Status: lines -- only a dest's
+ * own status file does).
+ *
+ * The load_variable_def / package-regex / package-list / package-
+ * variables filtering logic below deliberately duplicates (rather than
+ * calls into) load_package_data's equivalent setup, per the
+ * implementation plan's explicit instruction not to edit the legacy
+ * parsing functions at all -- this keeps the existing opkg backend at
+ * zero risk from this phase.
+ *
+ * Field mapping (apk JSON -> gpkg's expected keys), per the plan:
+ * name->Package/version->Version (handled by add_package_data's own
+ * key arguments, not a gpkg-key field), depends[]->", "-joined->
+ * Depends, provides[]->", "-joined->Provides, installed-size->
+ * Installed-Size, description->Description. Source-ID has no apk
+ * source; every apk-sourced entry gets the literal fallback "apk" (the
+ * plan calls for "a repo tag string" -- a real per-package repo tag
+ * isn't available from apk_query_json's current field set, so a fixed
+ * marker is used instead; revisit if a real need for per-repo
+ * distinction surfaces in a later phase). Alternatives has no apk
+ * source either and is intentionally never set here -- per the plan's
+ * ownership table, Alternatives is something gpkg computes/manages
+ * itself (alternatives.c), not sourced from either backend's listing. */
+void load_package_data_apk(opkg_conf* conf, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, string_map* preferred_provides)
+{
+	regex_t* match_regex           = parameters != NULL ? get_string_map_element(parameters, "package-regex") : NULL;
+	string_map* matching_list      = parameters != NULL ? get_string_map_element(parameters, "package-list") : NULL;
+	string_map* package_variables  = parameters == NULL ? NULL : get_string_map_element(parameters, "package-variables");
+
+	if(conf->apk_repository == NULL)
+	{
+		/* Nothing configured to query -- same as an empty lists_dir
+		 * under the legacy backend: no packages, no error. */
+		return;
+	}
+
+	if(load_variable_def < LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_MATCHING || load_variable_def >  LOAD_ALL_PKG_VARIABLES )
+	{
+		load_variable_def = LOAD_ALL_PKG_VARIABLES;
+	}
+
+	if(package_variables == NULL && load_variable_def == LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_MATCHING || load_variable_def == LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_ALL)
+	{
+		return;
+	}
+	if(match_regex == NULL && matching_list == NULL && (
+		load_variable_def == LOAD_MINIMAL_PKG_VARIABLES_FOR_MATCHING ||
+		load_variable_def == LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_MATCHING ||
+		load_variable_def == LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_MATCHING)
+		)
+	{
+		return;
+	}
+
+	string_map* load_variable_map = initialize_string_map(0);
+	char* all_dummy = strdup("A");
+	char* matching_dummy = strdup("M");
+
+	int include_all_packages;
+	include_all_packages =	load_variable_def != LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_MATCHING &&
+				load_variable_def != LOAD_MINIMAL_PKG_VARIABLES_FOR_MATCHING &&
+				load_variable_def != LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_MATCHING
+				? 1 : 0;
+
+	if(	load_variable_def == LOAD_MINIMAL_PKG_VARIABLES_FOR_ALL ||
+		load_variable_def == LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_ALL ||
+		load_variable_def == LOAD_MINIMAL_FOR_ALL_PKGS_DESCRIPTIVE_FOR_MATCHING ||
+		load_variable_def == LOAD_MINIMAL_FOR_ALL_PKGS_PARAMETER_FOR_MATCHING ||
+		load_variable_def == LOAD_MINIMAL_FOR_ALL_PKGS_ALL_FOR_MATCHING
+			)
+	{
+		set_string_map_element(load_variable_map, "Depends",             all_dummy);
+		set_string_map_element(load_variable_map, "Provides",            all_dummy);
+		set_string_map_element(load_variable_map, "Installed-Size",      all_dummy);
+		set_string_map_element(load_variable_map, "Install-Destination", all_dummy);
+	}
+	if( load_variable_def == LOAD_MINIMAL_PKG_VARIABLES_FOR_MATCHING || load_variable_def == LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_MATCHING )
+	{
+		set_string_map_element(load_variable_map, "Depends",             matching_dummy);
+		set_string_map_element(load_variable_map, "Provides",            matching_dummy);
+		set_string_map_element(load_variable_map, "Installed-Size",      matching_dummy);
+		set_string_map_element(load_variable_map, "Install-Destination", matching_dummy);
+	}
+	if(load_variable_def == LOAD_MINIMAL_FOR_ALL_PKGS_DESCRIPTIVE_FOR_MATCHING || load_variable_def == LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_ALL || load_variable_def == LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_MATCHING)
+	{
+		set_string_map_element(load_variable_map, "Description", (load_variable_def == LOAD_DESCRIPTIVE_PKG_VARIABLES_FOR_ALL ? all_dummy : matching_dummy));
+	}
+	if(load_variable_def == LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_MATCHING || load_variable_def == LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_ALL || load_variable_def == LOAD_MINIMAL_FOR_ALL_PKGS_PARAMETER_FOR_MATCHING )
+	{
+		unsigned long num_vars;
+		char** vars = get_string_map_keys(package_variables, &num_vars);
+		int var_index;
+		for(var_index=0; var_index < num_vars; var_index++)
+		{
+			if(get_string_map_element(load_variable_map, vars[var_index]) == NULL)
+			{
+				set_string_map_element(load_variable_map, vars[var_index], (load_variable_def == LOAD_PARAMETER_DEFINED_PKG_VARIABLES_FOR_ALL ? all_dummy : matching_dummy));
+			}
+		}
+		free_null_terminated_string_array(vars);
+	}
+
+	json_value* pkgs = apk_query_json(conf->apk_root, conf->apk_repository, conf->apk_keys_dir,
+		0, "name,version,depends,provides,installed-size,description", "*");
+	if(pkgs != NULL)
+	{
+		unsigned long i;
+		unsigned long n = json_arr_len(pkgs);
+		for(i = 0; i < n; i++)
+		{
+			json_value* member = json_arr_get(pkgs, i);
+			const char* name    = json_str(json_get(member, "name"));
+			const char* version = json_str(json_get(member, "version"));
+			int package_matches;
+			int include_package;
+			string_map* next_pkg_data;
+
+			if(name == NULL || version == NULL)
+			{
+				continue;
+			}
+
+			package_matches = 0;
+			if(match_regex != NULL)
+			{
+				package_matches = regexec(match_regex, name, 0, NULL, 0) == 0 ? 1 : 0;
+			}
+			else if(matching_list != NULL)
+			{
+				package_matches = get_string_map_element(matching_list, (char*)name) != NULL ? 1 : 0;
+			}
+			include_package = package_matches || include_all_packages;
+			if(!include_package)
+			{
+				continue;
+			}
+			if(package_matches && matching_packages != NULL)
+			{
+				set_string_map_element(matching_packages, (char*)name, strdup("D"));
+			}
+
+			next_pkg_data = initialize_string_map(1);
+
+			if(include_variable("Install-Destination", package_matches, include_package, load_variable_def, load_variable_map))
+			{
+				set_string_map_element(next_pkg_data, "Install-Destination", strdup(NOT_INSTALLED_STRING));
+			}
+			if(include_variable("Source-ID", package_matches, include_package, load_variable_def, load_variable_map))
+			{
+				set_string_map_element(next_pkg_data, "Source-ID", strdup("apk"));
+			}
+			if(include_variable("Depends", package_matches, include_package, load_variable_def, load_variable_map))
+			{
+				char* joined = join_json_string_array(json_get(member, "depends"), ", ");
+				if(joined != NULL) { set_string_map_element(next_pkg_data, "Depends", joined); }
+			}
+			if(include_variable("Provides", package_matches, include_package, load_variable_def, load_variable_map))
+			{
+				char* joined = join_json_string_array(json_get(member, "provides"), ", ");
+				if(joined != NULL) { set_string_map_element(next_pkg_data, "Provides", joined); }
+			}
+			if(include_variable("Installed-Size", package_matches, include_package, load_variable_def, load_variable_map))
+			{
+				long isize;
+				if(json_int(json_get(member, "installed-size"), &isize))
+				{
+					char buf[32];
+					snprintf(buf, sizeof(buf), "%ld", isize);
+					set_string_map_element(next_pkg_data, "Installed-Size", strdup(buf));
+				}
+			}
+			if(include_variable("Description", package_matches, include_package, load_variable_def, load_variable_map))
+			{
+				const char* desc = json_str(json_get(member, "description"));
+				if(desc != NULL) { set_string_map_element(next_pkg_data, "Description", strdup(desc)); }
+			}
+
+			add_package_data(existing_package_data, &next_pkg_data, (char*)name, (char*)version, preferred_provides);
+		}
+		json_free(pkgs);
+	}
+
+	{
+		unsigned long num_destroyed;
+		destroy_string_map(load_variable_map, DESTROY_MODE_IGNORE_VALUES, &num_destroyed);
+	}
+	free(all_dummy);
+	free(matching_dummy);
+}
+
 
 char** alloc_depend_def(char* def_version_str)
 {
