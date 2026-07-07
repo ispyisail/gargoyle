@@ -1015,8 +1015,12 @@ void load_package_data(char* data_source, int source_is_dir, string_map* existin
  * empty string) if arr is NULL/absent/empty, matching how a legacy
  * Packages file simply omits a field with nothing to say -- callers
  * should leave the gpkg key unset in that case, not set it to "". Any
- * non-string array element is skipped. Caller owns the returned string. */
-static char* join_json_string_array(json_value* arr, const char* sep)
+ * non-string array element is skipped. Caller owns the returned string.
+ * Not static: install.c's local-.apk-file install path (Phase 6) reuses
+ * this for apk_adbdump_json's "info.depends"/"info.provides" arrays,
+ * which need the exact same join treatment as apk_query_json's flat
+ * per-package "depends"/"provides" fields do. */
+char* join_json_string_array(json_value* arr, const char* sep)
 {
 	unsigned long i;
 	unsigned long n = json_arr_len(arr);

@@ -90,28 +90,31 @@ json_value* apk_query_json(const char* root, const char* repo, const char* keysd
 char* apk_fetch(const char* root, const char* repo, const char* keysdir,
 	const char* outdir, const char* pkg);
 
-/* `apk manifest --root <root> [--keys-dir <keysdir>] <file>` -- returns
- * a string_map of path -> "sha256:<hex>" (the pre-commit file list gpkg
- * needs before it ever extracts anything, for its own conflict-check/
- * files_to_link precompute). Despite needing no db to *read*, manifest
- * still enforces <file>'s package signature exactly like add/extract --
- * a signed package fails with "UNTRUSTED signature" unless keysdir (an
- * ABSOLUTE path -- see the module-level note above) names a directory
- * containing the trusted pubkey; keysdir may be NULL only for an
- * unsigned file or a root whose own /etc/apk/keys already has the
- * right key (this was NOT in the plan's original two-arg sketch --
- * found live while building this module's own tests: apk_add_mainroot's
- * --keys-dir does not get copied into <root>/etc/apk/keys, so every
- * later manifest/extract call against packages signed the same way
- * needs its own explicit keysdir again). apk manifest returns exit code
- * 0 even when <file> doesn't exist, printing "ERROR: <path>: ..." to
- * stdout instead of a real failure signal -- this function does NOT
- * trust exit_code alone; any output that isn't a well-formed run of
+/* `apk manifest --root <root> [--keys-dir <keysdir>] [--allow-untrusted]
+ * <file>` -- returns a string_map of path -> "sha256:<hex>" (the
+ * pre-commit file list gpkg needs before it ever extracts anything, for
+ * its own conflict-check/files_to_link precompute). Despite needing no
+ * db to *read*, manifest still enforces <file>'s package signature
+ * exactly like add/extract -- a signed package fails with "UNTRUSTED
+ * signature" unless keysdir (an ABSOLUTE path -- see the module-level
+ * note above) names a directory containing the trusted pubkey, OR
+ * allow_untrusted is set (needed for Phase 6's local-file install --
+ * a user-side-loaded .apk has no reason to be signed by a key gpkg's
+ * own keys dirs trust); keysdir may be NULL only when allow_untrusted
+ * is set, or for a root whose own /etc/apk/keys already has the right
+ * key (this was NOT in the plan's original two-arg sketch -- found live
+ * while building this module's own tests: apk_add_mainroot's --keys-dir
+ * does not get copied into <root>/etc/apk/keys, so every later
+ * manifest/extract call against packages signed the same way needs its
+ * own explicit keysdir again). apk manifest returns exit code 0 even
+ * when <file> doesn't exist, printing "ERROR: <path>: ..." to stdout
+ * instead of a real failure signal -- this function does NOT trust
+ * exit_code alone; any output that isn't a well-formed run of
  * "sha256:<hex>  <path>" lines (including the ERROR case, or an
  * UNTRUSTED-signature rejection) is treated as failure. Returns NULL on
  * failure. Caller owns the returned string_map (keys and values both
  * heap-owned) and must destroy_string_map() it. */
-string_map* apk_manifest(const char* root, const char* keysdir, const char* file);
+string_map* apk_manifest(const char* root, const char* keysdir, const char* file, int allow_untrusted);
 
 /* `apk extract [--keys-dir <keysdir>] --destination <destdir>
  * [--allow-untrusted] <file>` -- db-less, script-less, dependency-blind
@@ -122,16 +125,29 @@ string_map* apk_manifest(const char* root, const char* keysdir, const char* file
 int apk_extract(const char* keysdir, const char* destdir, const char* file, int allow_untrusted);
 
 /* `apk add --root <root> [--keys-dir <keysdir>] [--repository <repo>]
- * [--arch <arch>] [--initdb] [--usermode] <pkg>` -- full apk-native
- * install into a root apk itself owns (the main root only; non-main
- * dests always go through apk_fetch+apk_manifest+apk_extract instead).
- * initdb should be non-zero only the first time a given root is ever
- * touched by apk (creates /etc/apk/... under root); passing it again on
- * an already-initialized root is harmless (validated live) but is not
- * this function's job to infer -- caller decides. Returns 1 on success,
- * 0 on failure. */
+ * [--arch <arch>] [--initdb] [--usermode] [--allow-untrusted]
+ * [--force-non-repository] <pkg>` -- full apk-native install into a
+ * root apk itself owns (the main root only; non-main dests always go
+ * through apk_fetch+apk_manifest+apk_extract instead). initdb should be
+ * non-zero only the first time a given root is ever touched by apk
+ * (creates /etc/apk/... under root); passing it again on an already-
+ * initialized root is harmless (validated live) but is not this
+ * function's job to infer -- caller decides.
+ *
+ * local_file changes what <pkg> means and is required for Phase 6's
+ * local-.apk-file install support: when 0 (the common case), pkg is a
+ * name or name=version constraint resolved against repo. When 1, pkg is
+ * a literal filesystem path to a .apk file (confirmed live: `apk add`
+ * accepts this directly) -- but apk then requires
+ * --force-non-repository too (found live: without it, apk refuses with
+ * "you tried to add a non-repository package to system, but it would
+ * be lost on next reboot" -- correct behavior, since a plain --root
+ * install has no cache dir configured to survive that; gpkg's own
+ * bookkeeping status record is what actually persists the "this is
+ * installed" fact across a reboot for gpkg's own purposes, same as
+ * every other main-root install). Returns 1 on success, 0 on failure. */
 int apk_add_mainroot(const char* root, const char* repo, const char* keysdir,
-	const char* arch, int initdb, int usermode, const char* pkg);
+	const char* arch, int initdb, int usermode, int allow_untrusted, int local_file, const char* pkg);
 
 /* `apk del --root <root> <pkg>` -- removes pkg from the main root's own
  * apk-managed db, auto-purging any now-orphaned dependencies (apk's own

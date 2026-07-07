@@ -24,6 +24,7 @@
 #include <erics_tools.h>
 #include <bbtargz.h>
 #include <ewget.h>
+#include "json.h"
 
 #if __SIZEOF_POINTER__ == 8
 	#define SCANFU64 "%lu"
@@ -144,6 +145,7 @@ char** alloc_depend_def(char* def_version_str);
 void load_all_package_data(opkg_conf* conf, string_map* package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, char* install_root, int ignore_recursive_variables, string_map* preferred_provides);
 void load_package_data(char* data_source, int source_is_dir, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, char* dest_name, string_map* preferred_provides);
 void load_package_data_apk(opkg_conf* conf, string_map* existing_package_data, string_map* matching_packages, string_map* parameters, int load_variable_def, string_map* preferred_provides);
+char* join_json_string_array(json_value* arr, const char* sep);
 int load_recursive_package_data_variables(string_map* package_data, char* package, int load_size, int load_will_fit, uint64_t free_bytes);
 
 
@@ -182,9 +184,9 @@ int run_script_if_exists(char* install_root_path, char* install_link_path, char*
 /* install.c */
 void cp(char* src, char* dst);
 int create_dir_and_test_writable(char* dir);
-void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char* link_root_name, int is_upgrade, int overwrite_config, int overwrite_other_package_files, int force_reinstall, char* tmp_root);
-int recursively_install(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_config, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs);
-int recursively_install_apk(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs);
+void do_install(opkg_conf* conf, string_map* pkgs, char* install_root_name, char* link_root_name, int is_upgrade, int overwrite_config, int overwrite_other_package_files, int force_reinstall, char* tmp_root, int allow_untrusted);
+int recursively_install(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_config, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs, int allow_untrusted);
+int recursively_install_apk(char* pkg_name, char* pkg_version, char* install_root_name, char* link_to_root, char* overlay_path, int is_upgrade, int overwrite_other_package_files, char* tmp_dir, opkg_conf* conf, string_map* package_data, string_map* install_called_pkgs, int allow_untrusted);
 
 /* upgrade.c */
 void do_upgrade(opkg_conf* conf, string_map* pkgs, int preserve_conf_files, char* install_root_name, char* link_root, char* tmp_root);

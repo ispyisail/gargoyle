@@ -316,9 +316,9 @@ char* apk_fetch(const char* root, const char* repo, const char* keysdir,
 }
 
 
-string_map* apk_manifest(const char* root, const char* keysdir, const char* file)
+string_map* apk_manifest(const char* root, const char* keysdir, const char* file, int allow_untrusted)
 {
-	const char* argv[8];
+	const char* argv[9];
 	int i = 0;
 	apk_result* r;
 	string_map* result;
@@ -331,6 +331,7 @@ string_map* apk_manifest(const char* root, const char* keysdir, const char* file
 	argv[i++] = "--root";
 	argv[i++] = root;
 	if(keysdir != NULL) { argv[i++] = "--keys-dir"; argv[i++] = keysdir; }
+	if(allow_untrusted) { argv[i++] = "--allow-untrusted"; }
 	argv[i++] = file;
 	argv[i++] = NULL;
 
@@ -400,9 +401,16 @@ int apk_extract(const char* keysdir, const char* destdir, const char* file, int 
 
 
 int apk_add_mainroot(const char* root, const char* repo, const char* keysdir,
-	const char* arch, int initdb, int usermode, const char* pkg)
+	const char* arch, int initdb, int usermode, int allow_untrusted, int local_file, const char* pkg)
 {
-	const char* argv[16];
+	/* Max elements written below (all optional flags set): bin, add,
+	 * --root, root, --keys-dir, keysdir, --repository, repo, --arch,
+	 * arch, --initdb, --usermode, --allow-untrusted,
+	 * --force-non-repository, pkg, NULL = 16. Sized with margin above
+	 * that -- see the apk_extract/apk_update_mainroot stack-overflow
+	 * finding in the Phase 5 progress notes for why this margin is
+	 * deliberate, not decorative. */
+	const char* argv[20];
 	int i = 0;
 	apk_result* r;
 	int ok;
@@ -416,6 +424,8 @@ int apk_add_mainroot(const char* root, const char* repo, const char* keysdir,
 	if(arch != NULL) { argv[i++] = "--arch"; argv[i++] = arch; }
 	if(initdb) { argv[i++] = "--initdb"; }
 	if(usermode) { argv[i++] = "--usermode"; }
+	if(allow_untrusted) { argv[i++] = "--allow-untrusted"; }
+	if(local_file) { argv[i++] = "--force-non-repository"; }
 	argv[i++] = pkg;
 	argv[i++] = NULL;
 

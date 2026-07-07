@@ -149,7 +149,7 @@ int main(int argc, char** argv)
 
 	/* --- apk_manifest: real file (bar has exactly 2 files) ---------- */
 	{
-		string_map* m = apk_manifest(mainroot, keys, bar_apk);
+		string_map* m = apk_manifest(mainroot, keys, bar_apk, 0);
 		if(m == NULL)
 		{
 			fail("manifest: apk_manifest returned NULL for a real file");
@@ -181,7 +181,7 @@ int main(int argc, char** argv)
 	/* --- apk_manifest: nonexistent file must fail cleanly ----------- */
 	{
 		char* bogus = dynamic_strcat(2, lab, "/does-not-exist.apk");
-		string_map* m = apk_manifest(mainroot, keys, bogus);
+		string_map* m = apk_manifest(mainroot, keys, bogus, 0);
 		if(m != NULL)
 		{
 			unsigned long ndestroyed;
@@ -236,7 +236,7 @@ int main(int argc, char** argv)
 		rm_r(tmproot);
 		mkdir_p(tmproot, 0755);
 
-		ok = apk_add_mainroot(tmproot, repo, keys, "x86_64", 1, 1, "libfoo");
+		ok = apk_add_mainroot(tmproot, repo, keys, "x86_64", 1, 1, 0, 0, "libfoo");
 		if(!ok)
 		{
 			fail("add_mainroot: fresh initdb+usermode add of libfoo failed");
@@ -253,6 +253,31 @@ int main(int argc, char** argv)
 
 		ok = apk_del_mainroot(tmproot, "nonexistent-pkg-xyz");
 		if(ok) { fail("del_mainroot: removing a nonexistent package unexpectedly succeeded"); }
+	}
+
+	/* --- apk_add_mainroot with local_file=1 (Phase 6's local-.apk-file
+	 * install support) -- installs baz's raw .apk file directly by path,
+	 * not by name/repo lookup, matching a user handing gpkg a package
+	 * file directly. Reuses libfoo's absence of scripts reasoning: baz
+	 * is also script-free, so this isolates local_file's own new
+	 * --force-non-repository/--allow-untrusted wiring from the unrelated
+	 * script-sandbox limitation above. */
+	{
+		int ok;
+		char* baz_apk = dynamic_strcat(2, lab, "/repo/baz-1.0-r0.apk");
+
+		ok = apk_add_mainroot(tmproot, NULL, keys, "x86_64", 0, 1, 1, 1, baz_apk);
+		if(!ok)
+		{
+			fail("add_mainroot: local_file=1 add of baz's .apk path failed");
+		}
+		else
+		{
+			char* placed = dynamic_strcat(2, tmproot, "/usr/bin/baz");
+			if(!file_exists(placed)) { fail("add_mainroot: local_file=1 baz's files not present after add"); }
+			free(placed);
+		}
+		free(baz_apk);
 	}
 
 	free(mainroot); free(repo); free(keys); free(pluginroot);
