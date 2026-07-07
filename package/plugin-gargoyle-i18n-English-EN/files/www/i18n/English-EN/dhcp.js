@@ -41,3 +41,9 @@ dhcpS.ShowAdv="Show advanced (IPv6 reservation)";
 dhcpS.HideAdv="Hide advanced (IPv6 reservation)";
 
 dhcpS.grpErr="Group name may only contain letters, numbers, hyphen and underscore (no spaces).";
+
+dhcpS.UseAltGW="Use alternative default Gateway address";
+dhcpS.AltGW="Gateway address";
+dhcpS.leaseErr="Lease time must be greater than zero.";
+dhcpS.rangeGWErr="Alternative default Gateway address can't be 0 or 255 in the subnet.";
+dhcpS.leaseGWErr="Specified DHCP range contains the alternative Gateway address.";
