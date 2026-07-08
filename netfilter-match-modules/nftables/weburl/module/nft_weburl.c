@@ -55,6 +55,12 @@ static const struct nla_policy nft_weburl_policy[NFTA_WEBURL_MAX + 1] = {
 	[NFTA_WEBURL_MATCH]			= { .type = NLA_STRING, .len = WEBURL_TEXT_SIZE },
 };
 
+int strnicmp(const char * cs,const char * ct,size_t count);
+char *strnistr(const char *s, const char *find, size_t slen);
+int do_match_test(unsigned char match_type, const char* reference, char* query);
+int http_match(const struct nft_weburl_info* priv, const unsigned char* packet_data, int packet_length);
+int https_match(const struct nft_weburl_info* priv, const unsigned char* packet_data, int packet_length);
+
 int strnicmp(const char * cs,const char * ct,size_t count)
 {
 	register signed char __res = 0;
