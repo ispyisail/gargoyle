@@ -22,6 +22,16 @@ int main(int argc, char** argv)
 
 	opkg_conf *conf = load_conf((char*)get_string_map_element(parameters, "config"));
 
+	/* GPKG_BACKEND env var wins if set (matches every earlier gapk phase's
+	 * invocation, keeps CLI/test usage unchanged); otherwise, a `backend
+	 * apk` line in the conf file is the real on-target mechanism, since a
+	 * CGI process spawned through haserl can't be relied on to inherit an
+	 * environment variable. */
+	if(backend_env == NULL && conf->backend != NULL && strcmp(conf->backend, "apk") == 0)
+	{
+		gpkg_backend = GPKG_BACKEND_APK;
+	}
+
 	char* run_type                   = get_string_map_element(parameters, "run-type");
 	int force_overwrite_other_files  = get_string_map_element(parameters, "force-overwrite")         != NULL ? 1 : 0;
 	int force_overwrite_configs      = get_string_map_element(parameters, "force-overwrite-configs") != NULL ? 1 : 0;

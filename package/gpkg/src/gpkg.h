@@ -88,11 +88,16 @@
 
 
 /* gapk re-backend switch (see docs/gapk-implementation-plan.md in
- * gargoyle-tools): GPKG_BACKEND=apk in the environment selects the new
- * apk-sourced code paths added starting Phase 3; anything else (unset,
- * or any other value) runs the original opkg-format paths, unchanged.
- * gpkg_backend is set once, early in main(), and read (never written)
- * everywhere else. */
+ * gargoyle-tools): GPKG_BACKEND=apk in the environment, OR a `backend
+ * apk` line in the conf file, selects the new apk-sourced code paths
+ * added starting Phase 3; anything else (unset, or any other value)
+ * runs the original opkg-format paths, unchanged. The environment
+ * variable wins if set (CLI/test convenience, matches every earlier
+ * gapk phase's invocation); the conf file is the on-target mechanism
+ * for real installs, since a CGI process spawned through haserl can't
+ * reliably be relied on to inherit an environment variable the way an
+ * interactive shell does. gpkg_backend is set once, early in main(),
+ * and read (never written) everywhere else. */
 #define GPKG_BACKEND_OPKG 0
 #define GPKG_BACKEND_APK  1
 extern int gpkg_backend;
@@ -119,6 +124,11 @@ typedef struct opkg_conf_struct
 	char* apk_root;        /* default "/" if unset */
 	char* apk_repository;  /* path to an APKINDEX.adb; NULL = none configured */
 	char* apk_keys_dir;    /* MUST be absolute if set -- see apkexec.h */
+
+	/* on-target backend switch (see gpkg_backend above); NULL = not set
+	 * in the conf file, legacy opkg backend applies as always. The
+	 * GPKG_BACKEND environment variable, if set, overrides this. */
+	char* backend;
 } opkg_conf;
 
 opkg_conf* load_conf(const char* conf_file_name);
