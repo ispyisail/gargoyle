@@ -37,5 +37,6 @@ regexp * regcomp(char *exp, int *patternsize);
 int regexec(regexp *prog, char *string);
 void regsub(regexp *prog, char *source, char *dest);
 void regerror(char *s);
+__kernel_size_t my_strcspn(const char *s1,const char *s2);
 
 #endif
