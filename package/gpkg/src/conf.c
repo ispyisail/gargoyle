@@ -26,6 +26,7 @@ opkg_conf* load_conf(const char* conf_file_name)
 	conf->apk_root       = strdup("/");
 	conf->apk_repository = NULL;
 	conf->apk_keys_dir   = NULL;
+	conf->backend        = NULL;
 
 	FILE* conf_file =  fopen(dupe_conf_file_name, "r");
 	int read_data = 1;
@@ -96,6 +97,11 @@ opkg_conf* load_conf(const char* conf_file_name)
 					free_if_not_null(conf->apk_keys_dir);
 					conf->apk_keys_dir = strdup(split_line[num_pieces-1]);
 				}
+				else if(strcmp(split_line[0], "backend") == 0 && num_pieces >= 2)
+				{
+					free_if_not_null(conf->backend);
+					conf->backend = strdup(split_line[num_pieces-1]);
+				}
 				else if(strcmp(split_line[0], "src/gz") == 0)
 				{
 					set_string_map_element(conf->gzip_sources, split_line[num_pieces-2], strdup(split_line[num_pieces-1]));
@@ -136,6 +142,7 @@ void free_conf(opkg_conf* conf)
 	free(conf->apk_root);
 	free_if_not_null(conf->apk_repository);
 	free_if_not_null(conf->apk_keys_dir);
+	free_if_not_null(conf->backend);
 
 	destroy_string_map(conf->gzip_sources,    DESTROY_MODE_FREE_VALUES, &num_freed);
 	destroy_string_map(conf->plain_sources,   DESTROY_MODE_FREE_VALUES, &num_freed);
