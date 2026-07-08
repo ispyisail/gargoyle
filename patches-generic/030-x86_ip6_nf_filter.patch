@@ -1,0 +1,10 @@
+--- a/target/linux/x86/config-6.12
++++ b/target/linux/x86/config-6.12
+@@ -190,6 +190,7 @@ CONFIG_I2C_ALGOBIT=y
+ CONFIG_I2C_BOARDINFO=y
+ CONFIG_I8253_LOCK=y
+ CONFIG_IA32_FEAT_CTL=y
++CONFIG_IP6_NF_FILTER=m
+ # CONFIG_IB700_WDT is not set
+ # CONFIG_IBMASR is not set
+ # CONFIG_IBM_RTL is not set
