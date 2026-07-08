@@ -6,6 +6,18 @@ src/gz %d_%V_telephony %U/packages/%A/telephony
 src/gz gargoyle http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F
 src/gz gargoyle_kernel_specific http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F_kernelspecific
 
+# apk backend connection info (GPKG_BACKEND=apk only, see conf.c/gpkg.c --
+# gapk Phase 3/7). Inert for the default legacy backend above. Uses the
+# same version/board/profile substitution tokens as the gargoyle src/gz
+# lines above, nested under an "apk" segment so the two feed formats can
+# be served side by side from the same release tree without colliding.
+# (Written in prose, not the literal token characters, since this whole
+# file gets blanket sed-substituted at build time -- literal tokens in a
+# comment would get mangled the same as everywhere else.)
+apk_root /
+apk_repository http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F/apk/%A
+apk_keys_dir /etc/gargoyle/apk-keys
+
 dest root /
 dest ram /tmp
 dest plugin_root /plugin_root

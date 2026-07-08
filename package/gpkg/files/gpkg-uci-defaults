@@ -31,3 +31,8 @@ if [ ! -e /bin/opkg ] ; then
 	ln -s /usr/bin/gpkg /bin/opkg
 fi
 
+# GPKG_BACKEND=apk only (inert otherwise) -- ready for a release/test
+# signing pubkey to be dropped in, whether by the release-signing
+# runbook or vnet's own PKI setup. Not shipped with a key by default.
+mkdir -p /etc/gargoyle/apk-keys
+
