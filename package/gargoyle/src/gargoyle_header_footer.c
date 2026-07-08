@@ -66,8 +66,8 @@ char* ip6_combine_prefix_hostid(char* ip6, char* hostid);
 json_object* getInterfaceDump(void);
 json_object* getWirelessStatusDump(void);
 void get_ifstatus_ip6addrs(json_object* iface, list* ifstatus_ip6, list* ifstatus_mask6);
-void get_ifstatus_gateway(json_object* iface, char** ifstatus_gateway);
-void get_ifstatus_ipaddrs(json_object* iface, char** ifstatus_ip, char* ifstatus_mask);
+void get_ifstatus_gateway(json_object* iface, const char** ifstatus_gateway);
+void get_ifstatus_ipaddrs(json_object* iface, const char** ifstatus_ip, char* ifstatus_mask);
 
 
 int main(int argc, char **argv)
@@ -975,7 +975,7 @@ void get_ifstatus_ip6addrs(json_object* iface, list* ifstatus_ip6, list* ifstatu
 	}
 }
 
-void get_ifstatus_gateway(json_object* iface, char** ifstatus_gateway)
+void get_ifstatus_gateway(json_object* iface, const char** ifstatus_gateway)
 {
 	struct json_object* tmpobj = NULL;
 	struct json_object* routesarr = NULL;
@@ -1003,7 +1003,7 @@ void get_ifstatus_gateway(json_object* iface, char** ifstatus_gateway)
 	}
 }
 
-void get_ifstatus_ipaddrs(json_object* iface, char** ifstatus_ip, char* ifstatus_mask)
+void get_ifstatus_ipaddrs(json_object* iface, const char** ifstatus_ip, char* ifstatus_mask)
 {
 	struct json_object* tmpobj = NULL;
 	struct json_object* tmpobj2 = NULL;
@@ -1684,7 +1684,7 @@ char* get_interface_gateway(char* if_name, int family)
 									uint8_t* ipptr;
 									sscanf(split_line[2], "%X", &ip);
 									ip = htonl(ip);
-									ipptr = &ip;
+									ipptr = (uint8_t*)&ip;
 									gateway = (char*)malloc(20);
 									sprintf(gateway, "%u.%u.%u.%u", *(ipptr+3), *(ipptr+2), *(ipptr+1), *ipptr);
 								}

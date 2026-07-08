@@ -422,9 +422,13 @@ char pr_pack( void *buf, int cc, struct sockaddr_storage *from )
 
 }
 
-//These variables referenced but not used by the tc code we link to.
+//This variable is referenced but not used by the tc code we link to.
 int filter_ifindex;
-int use_iec = 0;
+//use_iec is also referenced by the tc code, but iproute2's own utils.c
+//(pulled in via libutil.a) already defines it -- GCC 14's default
+//-fno-common turns the previously-harmless duplicate tentative
+//definition into a hard "multiple definition" link error, so rely on
+//utils.h's extern declaration instead of redefining it here.
 
 
 int print_class(struct nlmsghdr *n, void *arg)
