@@ -36,3 +36,16 @@ fi
 # runbook or vnet's own PKI setup. Not shipped with a key by default.
 mkdir -p /etc/gargoyle/apk-keys
 
+# GPKG_BACKEND=apk only. Confirmed live: every apk operation (even a
+# read-only query) fails with "Unable to read database: No such file or
+# directory" against a fresh root that has never run a real `apk`
+# command -- the database at /lib/apk/db isn't created just by
+# installing the apk-mbedtls/apk-openssl package, only by an actual
+# `apk add --initdb` (or equivalent) call. Idempotent -- confirmed live,
+# running this again against an already-initialized db is a harmless
+# no-op ("OK: 0 B in 0 packages" both times), so it's safe to run
+# unconditionally on every boot rather than only once.
+if command -v apk >/dev/null 2>&1 ; then
+	apk --root / add --initdb >/dev/null 2>&1
+fi
+
