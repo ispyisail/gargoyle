@@ -1,12 +1,16 @@
 --- a/package/base-files/files/lib/functions.sh
 +++ b/package/base-files/files/lib/functions.sh
-@@ -213,16 +213,19 @@ default_prerm() {
+@@ -220,6 +220,7 @@
  	local root="${IPKG_INSTROOT}"
  	[ -z "$pkgname" ] && local pkgname="$(basename ${1%.*})"
  	local ret=0
 +	local pkg_prerm pkg_list
  	local filelist="${root}/usr/lib/opkg/info/${pkgname}.list"
  	[ -f "$root/lib/apk/packages/${pkgname}.list" ] && filelist="$root/lib/apk/packages/${pkgname}.list"
+ 
+@@ -227,13 +228,15 @@
+ 		update_alternatives remove "${pkgname}"
+ 	fi
  
 -	if [ -f "$root/usr/lib/opkg/info/${pkgname}.prerm-pkg" ]; then
 -		( . "$root/usr/lib/opkg/info/${pkgname}.prerm-pkg" )
@@ -23,7 +27,7 @@
  		if [ -n "$root" ]; then
  			${shell:-/bin/sh} "$root/etc/rc.common" "$root$i" disable
  		else
-@@ -238,7 +241,8 @@ default_prerm() {
+@@ -249,7 +252,8 @@
  
  add_group_and_user() {
  	[ -z "$pkgname" ] && local pkgname="$(basename ${1%.*})"
@@ -33,7 +37,7 @@
  	if [ -f "$root/lib/apk/packages/${pkgname}.rusers" ]; then
  		local rusers="$(cat $root/lib/apk/packages/${pkgname}.rusers)"
  	fi
-@@ -347,9 +351,18 @@ default_postinst() {
+@@ -358,9 +362,18 @@
  	[ -f "$root/lib/apk/packages/${pkgname}.list" ] && filelist="$root/lib/apk/packages/${pkgname}.list"
  	local ret=0
  
@@ -52,8 +56,8 @@
 +		add_group_and_user "${pkg_control}"
  	fi
  
- 	if [ -e "${root}/lib/apk/packages/${pkgname}.list" ]; then
-@@ -363,17 +376,17 @@ default_postinst() {
+ 	if [ -e "${root}/lib/apk/packages/${pkgname}.alternatives" ]; then
+@@ -373,17 +386,17 @@
  	fi
  
  	if [ -z "$root" ]; then
@@ -75,8 +79,8 @@
  				( [ -f "$i" ] && cd "$(dirname $i)" && . "$i" ) && rm -f "$i"
  			done
  			uci commit
-@@ -382,13 +395,13 @@ default_postinst() {
- 		rm -f /tmp/luci-indexcache
+@@ -392,13 +405,13 @@
+ 		rm -f /tmp/luci-indexcache.*
  	fi
  
 -	if [ -f "$root/usr/lib/opkg/info/${pkgname}.postinst-pkg" ]; then

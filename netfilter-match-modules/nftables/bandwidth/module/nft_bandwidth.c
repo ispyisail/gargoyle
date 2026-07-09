@@ -133,6 +133,10 @@ static ktime_t get_nominal_previous_reset_time(struct nft_bandwidth_info *info, 
 
 static uint64_t* initialize_map_entries_for_ip(info_and_maps* iam, char* ip, uint64_t initial_bandwidth, uint32_t family);
 
+char** split_on_separators(char* line, char* separators, int num_separators, int max_pieces, int include_remainder_at_max, unsigned long *num_pieces);
+char* trim_flanking_whitespace(char* str);
+void parse_ips_and_ranges(char* addr_str, struct nft_bandwidth_info *priv);
+
 int free_null_terminated_string_array(char** strs);
 
 int free_null_terminated_string_array(char** strs)
@@ -204,7 +208,6 @@ static const struct nla_policy nft_bandwidth_policy[NFTA_BANDWIDTH_MAX + 1] = {
 	[NFTA_BANDWIDTH_RSTTIME]	        = { .type = NLA_U64 },
 	[NFTA_BANDWIDTH_NUMINTVLSTOSAVE]    = { .type = NLA_U32 },
 	[NFTA_BANDWIDTH_LASTBACKUPTIME]	    = { .type = NLA_U64 },
-	[NFTA_BANDWIDTH_MINUTESWEST]	    = { .type = NLA_U32 },
 };
 
 static void adjust_ip_for_backwards_time_shift(char* key, void* value)
@@ -3464,10 +3467,23 @@ static int __init init(void)
 	if(id_map == NULL) /* deal with kmalloc failure */
 	{
 		printk("id map is null, returning -1\n");
+		nf_unregister_sockopt(&nft_bandwidth_sockopts);
 		return -1;
 	}
 
-	return nft_register_expr(&nft_bandwidth_type);
+	{
+		int register_err = nft_register_expr(&nft_bandwidth_type);
+		if(register_err != 0)
+		{
+			/* registration failed (e.g. too many netlink attributes for
+			 * this kernel's NFT_EXPR_MAXATTR) -- undo the sockopt
+			 * registration above, otherwise the kernel's sockopt table
+			 * is left pointing at code that's about to be unloaded */
+			printk("nft_bandwidth: nft_register_expr failed (%d), unregistering sockopts\n", register_err);
+			nf_unregister_sockopt(&nft_bandwidth_sockopts);
+		}
+		return register_err;
+	}
 }
 
 static void __exit fini(void)

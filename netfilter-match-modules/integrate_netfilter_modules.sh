@@ -143,12 +143,12 @@ EOF
 	printf "$defines\n" >> nf-patch-build/linux-download-make
 
 	cat << 'EOF' >>nf-patch-build/linux-download-make
+GENERIC_PLATFORM_DIR := $(TOPDIR)/target/linux/generic
+PLATFORM_DIR:=$(TOPDIR)/target/linux/$(BOARD)
+
 include $(INCLUDE_DIR)/kernel-version.mk
 KERNEL_NAME:=$(shell echo "$(KERNEL)" | sed 's/ /\./g' |  sed 's/\.$$//g' )
 KERNEL_PATCHVER_NAME:=$(shell echo "$(KERNEL_PATCHVER)" | sed 's/ /\./g' |  sed 's/\.$$//g' )
-
-GENERIC_PLATFORM_DIR := $(TOPDIR)/target/linux/generic
-PLATFORM_DIR:=$(TOPDIR)/target/linux/$(BOARD)
 
 GENERIC_BACKPORT_PATCH_DIR := $(GENERIC_PLATFORM_DIR)/backport-$(KERNEL_NAME)
 GENERIC_PENDING_PATCH_DIR := $(GENERIC_PLATFORM_DIR)/pending-$(KERNEL_NAME)
