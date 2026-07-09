@@ -127,35 +127,12 @@ check_sta()
 	else
 		sta_wlan="${phyname}-sta0"
 	fi
-	# `iwinfo <iface> info`'s ESSID field is stale under this OpenWrt base:
-	# confirmed live that after a real, verified disconnect (`iw link`
-	# correctly reports "Not connected.", and wpa_supplicant's own
-	# `wpa_cli status` already shows wpa_state=SCANNING), iwinfo info kept
-	# printing the last-associated ESSID unchanged for 150+ seconds, with
-	# only Channel/Signal/Bit Rate degrading to unknown/0 -- and the old
-	# "unknown" substring check below only ever inspected the ESSID and
-	# Channel fields specifically, neither of which actually contains the
-	# literal word "unknown" in this degraded-but-still-"connected"
-	# state (Channel's degraded value prints as "0", not "unknown"), so
-	# it never caught a real disconnect. Query wpa_supplicant's own
-	# kernel-backed link state directly instead -- confirmed reliable in
-	# both directions live (correctly flips to "Not connected." within
-	# one poll of a genuine AP loss, and reports full signal detail
-	# immediately on a fresh real association).
-	link_info="$(iw dev "$sta_wlan" link 2>/dev/null)"
-	if echo "$link_info" | grep -q "^Connected to" ; then
-		sta_connected=true
-		sta_dbm="$(echo "$link_info" | awk '/^[[:space:]]*signal:/ {print $2}')"
-		sta_quality="$(awk -v dbm="${sta_dbm:--110}" 'BEGIN {
-			q = dbm + 110
-			if (q > 70) q = 70
-			if (q < 0) q = 0
-			printf "%i", q * 100 / 70
-		}')"
-	else
-		sta_connected=false
-		sta_quality=0
-	fi
+	wireless_info="$(iwinfo $sta_wlan i 2>/dev/null)"
+	
+	
+	sta_connected="$(echo "$wireless_info" | awk '/ESSID:/ {print $3}; /Channel:/ {print $4};' | grep -v "unknown")"
+	[ -z "$sta_connected" ] && sta_connected=false || sta_connected=true
+	sta_quality="$(echo "$wireless_info" | awk -F "[ ]" '/Link Quality:/{split($NF,var0,"/");printf "%i\n",(var0[1]*100/var0[2])}')"
 	sta_ssid="$(uci_get "wireless" "$stacfgsec" "ssid")"
 	sta_bssid="$(uci_get "wireless" "$stacfgsec" "bssid")"
 	sta_encryption="$(uci_get "wireless" "$stacfgsec" "encryption")"
@@ -190,72 +167,9 @@ get_current_active_sta_section()
 get_scan_results()
 {
 	local radios="radio0 radio1"
-	local tmpif="stamgr-tmp0"
 	scan_results=""
 	for radio in $radios ; do
-		# Use the resolved phy directly, same reasoning and same pattern as
-		# check_sta(): UCI's own radio section name ("radio0") doesn't
-		# reliably match the kernel's actual phy number.
-		phyname="$(iwinfo nl80211 phyname $radio 2>&1)"
-		[ "$phyname" = "Phy not found" ] && continue
-
-		# `iwinfo <iface> scan` is broken outright under this OpenWrt base
-		# (confirmed: fails with "Netlink error while awaiting scan
-		# results: No event received" even on a real, already-up
-		# interface). Separately, when the STA config's own real interface
-		# exists, it's already owned by netifd's global wpa_supplicant
-		# daemon, which refuses a second, externally-triggered scan on the
-		# same vif ("Resource busy"). And when the STA config is
-		# `disabled`, no kernel interface exists for it at all any more
-		# (confirmed live: disabled=1 wifi-iface sections produce zero
-		# interface under this netifd, unlike 24.10) -- there's nothing
-		# for `iwinfo`/`iw` to scan against in the idle case either way.
-		#
-		# Work around all three by scanning through a short-lived,
-		# daemon-independent interface created directly on the phy with
-		# plain `iw`, instead of going through iwinfo or the STA config's
-		# own interface. Verified this works identically whether the phy
-		# is fully idle or already hosts a live, connected STA vif -- a
-		# second vif on the same phy scans without disturbing the first's
-		# association (mac80211/hwsim's own off-channel scan support, the
-		# same mechanism a real STA's background roam-scan already relies
-		# on; a phy already running an AP vif pays the same brief
-		# beacon-interruption cost during the scan that any single-radio
-		# AP+STA repeater setup already accepts today, not a new cost).
-		# Interface name must stay under Linux's 15-char IFNAMSIZ limit.
-		iw dev "$tmpif" del >/dev/null 2>&1
-		iw phy "$phyname" interface add "$tmpif" type station >/dev/null 2>&1 || continue
-		ip link set "$tmpif" up >/dev/null 2>&1
-		sleep 1
-		scan_list="$(iw dev "$tmpif" scan 2>/dev/null | awk -v radio="$radio" '
-			function flush() {
-				if (bssid != "") {
-					enc = has_rsn ? "-" : "+"
-					printf "%i,%s,\"%s\",%s,%s\n", quality, bssid, ssid, enc, radio
-				}
-			}
-			BEGIN { bssid=""; ssid=""; quality=0; has_rsn=0 }
-			/^BSS / {
-				flush()
-				bssid=$2; sub(/\(.*/, "", bssid)
-				ssid=""; quality=0; has_rsn=0
-			}
-			/^\tsignal:/ {
-				q = $2 + 110
-				if (q > 70) q = 70
-				if (q < 0) q = 0
-				quality = int(q * 100 / 70)
-			}
-			/^\tSSID:/ {
-				ssid=$0
-				sub(/^\tSSID: /, "", ssid)
-				gsub(/,/, ".", ssid)
-			}
-			/^\tRSN:/ || /^\tWPA:/ { has_rsn=1 }
-			END { flush() }
-		' | sort -rn)"
-		iw dev "$tmpif" del >/dev/null 2>&1
-
+		scan_list="$(iwinfo $radio s 2>/dev/null | awk -v var4="$radio" 'BEGIN{FS="[[:space:]]"}/Address:/{var1=$NF}/ESSID:/{var2="";for(i=12;i<=NF;i++)if(var2==""){var2=$i}else{var2=var2" "$i};gsub(/,/,".",var2)}/Quality:/{split($NF,var0,"/")}/Encryption:/{if($NF=="none"){var3="+"}else{var3="-"};printf "%i,%s,%s,%s,%s\n",(var0[1]*100/var0[2]),var1,var2,var3,var4}' | sort -rn)"
 		if [ -z "${scan_results}" ] ; then
 			scan_results="$scan_list"
 		else

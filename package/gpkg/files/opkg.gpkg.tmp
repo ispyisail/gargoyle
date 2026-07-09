@@ -6,25 +6,6 @@ src/gz %d_%V_telephony %U/packages/%A/telephony
 src/gz gargoyle http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F
 src/gz gargoyle_kernel_specific http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F_kernelspecific
 
-# apk backend connection info (GPKG_BACKEND=apk only, see conf.c/gpkg.c --
-# gapk Phase 3/7). Inert for the default legacy backend above. Uses the
-# same version/board/profile substitution tokens as the gargoyle src/gz
-# lines above, nested under an "apk" segment so the two feed formats can
-# be served side by side from the same release tree without colliding.
-# (Written in prose, not the literal token characters, since this whole
-# file gets blanket sed-substituted at build time -- literal tokens in a
-# comment would get mangled the same as everywhere else.)
-#
-# Deliberately no arch segment on this URL, unlike the ipk src/gz lines
-# above -- confirmed live that `apk`'s own `--print-arch` (e.g. "x86",
-# not the ipk-side arch string like "i386_pentium4") gets appended by
-# apk itself when it fetches "<apk_repository>/<its own arch>/
-# APKINDEX.tar.gz". Adding an arch segment here too would double it up
-# and 404.
-apk_root /
-apk_repository http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F/apk
-apk_keys_dir /etc/gargoyle/apk-keys
-
 dest root /
 dest ram /tmp
 dest plugin_root /plugin_root

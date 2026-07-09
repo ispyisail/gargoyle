@@ -45,16 +45,7 @@ enum nft_bandwidth_attributes {
 	NFTA_BANDWIDTH_NEXTRESET,
 	NFTA_BANDWIDTH_PREVRESET,
 	NFTA_BANDWIDTH_LASTBACKUPTIME,
-	/* NFTA_BANDWIDTH_MINUTESWEST removed: kernel 6.12 added
-	 * WARN_ON_ONCE(type->maxattr > NFT_EXPR_MAXATTR) [16] to
-	 * nft_register_expr(), which this 18-value enum (17 real
-	 * attributes) exceeded. This attribute was never actually read
-	 * by the kernel side (declared in the parse policy only) and had
-	 * no caller in Gargoyle's own rule-generation code, so it was the
-	 * one to drop. Kept in sync with the userspace wire-format copy
-	 * in netfilter-match-modules/nftables/bandwidth/libnftnl/
-	 * include_linux_netfilter_bandwidth.h -- both enums must stay
-	 * numerically identical. */
+	NFTA_BANDWIDTH_MINUTESWEST,
 	NFTA_BANDWIDTH_PAD,
 	__NFTA_BANDWIDTH_MAX,
 };

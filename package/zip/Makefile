@@ -41,40 +41,12 @@ define Package/zip/description
 	but the methods differ.
 endef
 
-# The stock "generic" target's unix/configure runs feature-detection
-# probes that try to compile+link+run tiny test programs -- impossible
-# under cross-compilation, so every probe silently assumes the worst
-# and falls back to a batch of "-DNO_*"/"-DZMEM" defines that select
-# zip's own bundled, K&R-style fallback implementations (of memset,
-# mktime, etc, each guarded by a hand-written prototype in zip.h/
-# timezone.c that assumes no real ANSI <string.h>/<time.h> exists).
-# musl provides working, ANSI-conformant versions of every one of these
-# (memset/memcpy/memcmp, rmdir, strchr/strrchr, rename, mktemp/mkstemp/
-# mktime, errno, dirent, valloc), so every one of these defines is, and
-# always has been, a false positive for this cross build -- GCC <= 13
-# only warned about the resulting prototype conflicts/incomplete-type
-# uses; GCC 14 (first used by this toolchain, 25.12) makes them hard
-# errors. Split configure and build into two steps so the generated
-# flags file can have the whole false-positive batch stripped in
-# between, instead of patching zip's own 2008-era unix/Makefile or
-# unix/configure, or whack-a-moling one -DNO_* at a time as each newly
-# becomes a hard error.
-define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR) \
-		-f unix/Makefile flags \
+MAKE_FLAGS += \
+	-f unix/Makefile generic \
+		prefix="$(PKG_INSTALL_DIR)/usr" \
+		CFLAGS="$(TARGET_CFLAGS)" \
 		CC="$(TARGET_CC) $(TARGET_CFLAGS) -O $(TARGET_CPPFLAGS) -I. -DUNIX $(TARGET_LDFLAGS)" \
 		IZ_BZIP2="no"
-	sed -i -E 's/-D(NO_[A-Z0-9_]+|ZMEM)//g' $(PKG_BUILD_DIR)/flags
-	cd $(PKG_BUILD_DIR); eval $(MAKE) -f unix/Makefile zips `cat $(PKG_BUILD_DIR)/flags` \
-		prefix="$(PKG_INSTALL_DIR)/usr" \
-		IZ_BZIP2="no"
-endef
-
-define Build/Install
-	$(MAKE) -C $(PKG_BUILD_DIR) \
-		-f unix/Makefile install \
-		prefix="$(PKG_INSTALL_DIR)/usr"
-endef
 
 define Package/zip/install
 	$(INSTALL_DIR) $(1)/usr/bin/

@@ -19,17 +19,7 @@ PKG_LICENSE:=MIT
 PKG_LICENSE_FILES:=LICENSE
 PKG_CPE_ID:=cpe:/a:libffi_project:libffi
 
-# PKG_FIXUP:=autoreconf intentionally NOT set: re-running autoreconf with
-# this toolchain's newer host autoconf/automake (bumped alongside GCC/CMake
-# for the 25.12 base) regenerates libffi's build system with a build-vs-host
-# triplet mismatch (recurses into a "x86_64-pc-linux-musl"-named target that
-# was never actually configured, since the real cross build configured
-# "x86_64-openwrt-linux-gnu" instead) -- "No rule to make target
-# 'all-configured'". libffi 3.4.6's release tarball ships a working,
-# upstream-tested ./configure already; skipping autoreconf avoids the
-# regression entirely and needs no other changes since x86_64 is a
-# long-standard architecture (autoreconf's usual purpose -- refreshing
-# config.sub/config.guess for newer targets -- doesn't apply here).
+PKG_FIXUP:=autoreconf
 PKG_INSTALL:=1
 PKG_BUILD_PARALLEL:=1
 PKG_BUILD_FLAGS:=no-mips16

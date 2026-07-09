@@ -25,7 +25,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <getopt.h>
-#include <unistd.h>
 
 #include <arpa/inet.h>
 

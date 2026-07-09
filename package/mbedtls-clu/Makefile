@@ -10,7 +10,7 @@ MAKE_PATH:=src
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=https://github.com/lantis1008/mbedtls-clu.git
-PKG_MIRROR_HASH:=54875e65da5537088dcd2334381fef0d7111ad30842b16790b391ab66390574e
+PKG_MIRROR_HASH:=79eef689b7fd1323c69a5c6a3f03e4829181f014c77cdacb5b5a904b42ee34c7
 
 # Set to 1 to dynamically link libericstools, or 0 to static compile
 DLINK_LIBERICSTOOLS:=1

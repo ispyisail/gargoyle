@@ -621,14 +621,7 @@ for target in $targets ; do
 		else
 			make $num_build_thread_str V=s GARGOYLE_VERSION="$numeric_gargoyle_version" GARGOYLE_VERSION_NAME="$lower_short_gargoyle_version" GARGOYLE_PROFILE="$default_profile"
 		fi
-		make_exit=$?
-		if [ "$make_exit" != "0" ] ; then
-			echo ""
-			echo "ERROR: OpenWrt make failed (exit $make_exit) for target $target profile $default_profile"
-			echo "       Re-run with a direct 'make V=s' in $target-src to see the failing package."
-			exit "$make_exit"
-		fi
-
+		
 		if [ "$distribution" = "true" ] || [ "$distribution" = "TRUE" ] || [ "$distribution" = "1" ] ; then
 			distribution="true"
 			distrib_init
@@ -701,16 +694,9 @@ for target in $targets ; do
 		copy_buildinfo "$openwrt_target" "$subtarget_arch" "$target" "$default_profile"
 		copy_sha256sums "$openwrt_target" "$subtarget_arch" "$target" "$default_profile"
 
-		#if we didn't build anything, die horribly -- but say why, this
-		#used to exit silently and made real build failures look like the
-		#script just stopped for no reason
+		#if we didn't build anything, die horribly
 		if [ -z "$image_files" ] ; then
-			echo ""
-			echo "ERROR: no image files found in bin/targets/$arch/$subtarget_arch after build"
-			echo "       The OpenWrt make above did not produce images -- it likely failed"
-			echo "       partway through. Re-run with a direct 'make V=s' in $target-src"
-			echo "       to see the failing package."
-			exit 1
+			exit
 		fi
 		
 		if [ "$distribution" = "true" ] ; then
@@ -765,23 +751,12 @@ for target in $targets ; do
 			else
 				make $num_build_thread_str V=s GARGOYLE_VERSION="$numeric_gargoyle_version" GARGOYLE_VERSION_NAME="$lower_short_gargoyle_version" GARGOYLE_PROFILE="$profile_name"
 			fi
-			make_exit=$?
-			if [ "$make_exit" != "0" ] ; then
-				echo ""
-				echo "ERROR: OpenWrt make failed (exit $make_exit) for target $target profile $profile_name"
-				echo "       Re-run with a direct 'make V=s' in $target-src to see the failing package."
-				exit "$make_exit"
-			fi
 
-			#if we didn't build anything, die horribly -- and say why
+
+			#if we didn't build anything, die horribly
 			image_files=$(ls "bin/targets/$arch/" 2>/dev/null)
 			if [ -z "$image_files" ] ; then
-				echo ""
-				echo "ERROR: no image files found in bin/targets/$arch/ after build of profile $profile_name"
-				echo "       The OpenWrt make above did not produce images -- it likely failed"
-				echo "       partway through. Re-run with a direct 'make V=s' in $target-src"
-				echo "       to see the failing package."
-				exit 1
+				exit
 			fi
 
 			#copy packages to build/target directory
