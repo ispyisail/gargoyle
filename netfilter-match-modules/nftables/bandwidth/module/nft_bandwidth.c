@@ -21,18 +21,6 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/*
- * KNOWN ISSUE (2026-07-09): this module corrupts the ext4 rootfs at
- * runtime when loaded on kernel 6.12.94 (confirmed on the x86 vnet-wifi
- * profile of feature/openwrt-2512-bump). It compiles cleanly but is NOT
- * currently safe to load on this kernel. Isolated via module-by-module
- * boot testing against nft_webmon.ko / nft_weburl.ko, both of which are
- * confirmed unaffected. Root cause not yet found; suspected area is the
- * nf_register_sockopt()-based userspace interface in init() below, the
- * only one of the three nftables modules using that mechanism, but this
- * is not confirmed. See https://github.com/ispyisail/gargoyle/issues/40
- */
-
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/module.h>
