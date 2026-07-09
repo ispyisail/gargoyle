@@ -31,7 +31,6 @@ struct nftnl_expr_bandwidth {
 	uint64_t prev_reset;
 	uint32_t num_intervals_to_save;
 	uint64_t last_backup_time;
-	uint32_t minutes_west;
 };
 
 int get_minutes_west(void);
@@ -93,9 +92,6 @@ static int nftnl_expr_bandwidth_set(struct nftnl_expr *e, uint16_t type,
 	case NFTNL_EXPR_BANDWIDTH_LASTBACKUPTIME:
 		memcpy(&bandwidth->last_backup_time, data, data_len);
 		break;
-    case NFTNL_EXPR_BANDWIDTH_MINUTESWEST:
-		memcpy(&bandwidth->minutes_west, data, data_len);
-		break;
 	}
 	return 0;
 }
@@ -152,9 +148,6 @@ nftnl_expr_bandwidth_get(const struct nftnl_expr *e, uint16_t type,
 	case NFTNL_EXPR_BANDWIDTH_LASTBACKUPTIME:
 		*data_len = sizeof(uint64_t);
 		return &bandwidth->last_backup_time;
-    case NFTNL_EXPR_BANDWIDTH_MINUTESWEST:
-		*data_len = sizeof(uint32_t);
-		return &bandwidth->minutes_west;
 	}
 	return NULL;
 }
@@ -176,7 +169,6 @@ static int nftnl_expr_bandwidth_cb(const struct nlattr *attr, void *data)
 			abi_breakage();
 		break;
 	case NFTA_BANDWIDTH_NUMINTVLSTOSAVE:
-	case NFTA_BANDWIDTH_MINUTESWEST:
 		if (mnl_attr_validate(attr, MNL_TYPE_U32) < 0)
 			abi_breakage();
 		break;
@@ -206,7 +198,6 @@ static void
 nftnl_expr_bandwidth_build(struct nlmsghdr *nlh, const struct nftnl_expr *e)
 {
 	struct nftnl_expr_bandwidth *bandwidth = nftnl_expr_data(e);
-	uint32_t minuteswest = 0;
 
 	if (e->flags & (1 << NFTNL_EXPR_BANDWIDTH_ID))
 		mnl_attr_put_strz(nlh, NFTA_BANDWIDTH_ID, bandwidth->id);
@@ -240,10 +231,6 @@ nftnl_expr_bandwidth_build(struct nlmsghdr *nlh, const struct nftnl_expr *e)
 		mnl_attr_put_u64(nlh, NFTA_BANDWIDTH_LASTBACKUPTIME, htobe64(bandwidth->last_backup_time));
 
 	set_kernel_timezone();
-	minuteswest = get_minutes_west();
-
-	if (e->flags & (1 << NFTNL_EXPR_BANDWIDTH_MINUTESWEST))
-		mnl_attr_put_u32(nlh, NFTA_BANDWIDTH_MINUTESWEST, htonl(minuteswest));
 }
 
 static int
@@ -330,10 +317,6 @@ nftnl_expr_bandwidth_parse(struct nftnl_expr *e, struct nlattr *attr)
 		bandwidth->last_backup_time = be64toh(mnl_attr_get_u64(tb[NFTA_BANDWIDTH_LASTBACKUPTIME]));
 		e->flags |= (1 << NFTNL_EXPR_BANDWIDTH_LASTBACKUPTIME);
 	}
-	if (tb[NFTA_BANDWIDTH_MINUTESWEST]) {
-		bandwidth->minutes_west = ntohl(mnl_attr_get_u32(tb[NFTA_BANDWIDTH_MINUTESWEST]));
-		e->flags |= (1 << NFTNL_EXPR_BANDWIDTH_MINUTESWEST);
-	}
 
 	return 0;
 }
@@ -345,13 +328,8 @@ nftnl_expr_bandwidth_snprintf(char *buf, size_t len,
 	struct nftnl_expr_bandwidth *bandwidth = nftnl_expr_data(e);
 	int ret, offset = 0, remain = len;
 	time_t now;
-	int minuteswest = 0;
 
-   time(&now);
-	if(e->flags & (1 << NFTNL_EXPR_BANDWIDTH_MINUTESWEST)) {
-		minuteswest = bandwidth->minutes_west;
-	}
-	now = now - (minuteswest*60);
+	time(&now);
 
 	if(e->flags & (1 << NFTNL_EXPR_BANDWIDTH_CMP) && e->flags & (1 << NFTNL_EXPR_BANDWIDTH_CHECKTYPE)) {
 		if(bandwidth->cmp == NFT_BANDWIDTH_CMP_CHECK && bandwidth->check_type != 0)
@@ -468,7 +446,6 @@ static struct attr_policy bandwidth_attr_policy[__NFTNL_EXPR_BANDWIDTH_MAX] = {
 	[NFTNL_EXPR_BANDWIDTH_NEXTRESET] = { .maxlen = sizeof(uint64_t) },
 	[NFTNL_EXPR_BANDWIDTH_PREVRESET] = { .maxlen = sizeof(uint64_t) },
 	[NFTNL_EXPR_BANDWIDTH_LASTBACKUPTIME] = { .maxlen = sizeof(uint64_t) },
-	[NFTNL_EXPR_BANDWIDTH_MINUTESWEST] = { .maxlen = sizeof(uint32_t) },
 };
 
 struct expr_ops expr_ops_bandwidth = {
