@@ -1,0 +1,25 @@
+kernel 6.12 split the legacy iptables/ip6tables code behind hidden
+select-only symbols (IP_NF_IPTABLES_LEGACY / IP6_NF_IPTABLES_LEGACY).
+CONFIG_IP6_NF_IPTABLES=m alone (all that kmod-nf-ipt6 sets via
+include/netfilter.mk) no longer builds ip6_tables.ko, because nothing
+selects the legacy symbol -- so kmod-nf-ipt6 fails to package on every
+target. The IPv4 twin only works by accident: kmod-ipt-core's
+CONFIG_IP_NF_FILTER=m selects IP_NF_IPTABLES_LEGACY, and that package
+is in Gargoyle's set; there is no IPv6 equivalent selected.
+
+Enable IP6_NF_FILTER=m in the GENERIC kernel config (it selects
+IP6_NF_IPTABLES_LEGACY), fixing every target at once. Replaces the
+earlier x86-only version of this patch, which fixed the same issue via
+target/linux/x86/config-6.12 before mediatek hit it too.
+
+--- a/target/linux/generic/config-6.12
++++ b/target/linux/generic/config-6.12
+@@ -2850,7 +2850,7 @@
+ CONFIG_IO_WQ=y
+ # CONFIG_IP17XX_PHY is not set
+ # CONFIG_IP5XXX_POWER is not set
+-# CONFIG_IP6_NF_FILTER is not set
++CONFIG_IP6_NF_FILTER=m
+ # CONFIG_IP6_NF_IPTABLES is not set
+ # CONFIG_IP6_NF_MANGLE is not set
+ # CONFIG_IP6_NF_MATCH_AH is not set
