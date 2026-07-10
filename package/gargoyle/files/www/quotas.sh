@@ -61,6 +61,19 @@
 </script>
 
 <h1 class="page-header"><%~ quotas.mQuotas %></h1>
+<%
+	# Same alternative-gateway notice as the Bandwidth page (discussion #48
+	# P4): clients routed through another gateway bypass quota enforcement.
+	alt_gw_active="0"
+	for dhcp_opt in $(uci -q get dhcp.lan.dhcp_option) ; do
+		case "$dhcp_opt" in
+			3,*) alt_gw_active="1" ;;
+		esac
+	done
+%>
+<div class="alert alert-warning" style="display:<% [ "$alt_gw_active" = "1" ] && printf block || printf none %>">
+	<%~ quotas.AltGWNotice %>
+</div>
 <div class="row">
 	<div class="col-lg-6">
 		<div class="panel panel-default">
