@@ -35,7 +35,7 @@
 
 #include <linux/semaphore.h> 
 
-#include "bandwidth_deps/tree_map.h"
+#include "nft_bandwidth_deps/tree_map.h"
 #include <linux/netfilter/nft_bandwidth.h>
 
 #include <linux/ip.h>
@@ -133,6 +133,10 @@ static ktime_t get_nominal_previous_reset_time(struct nft_bandwidth_info *info, 
 
 static uint64_t* initialize_map_entries_for_ip(info_and_maps* iam, char* ip, uint64_t initial_bandwidth, uint32_t family);
 
+char** split_on_separators(char* line, char* separators, int num_separators, int max_pieces, int include_remainder_at_max, unsigned long *num_pieces);
+char* trim_flanking_whitespace(char* str);
+void parse_ips_and_ranges(char* addr_str, struct nft_bandwidth_info *priv);
+
 int free_null_terminated_string_array(char** strs);
 
 int free_null_terminated_string_array(char** strs)
@@ -204,6 +208,7 @@ static const struct nla_policy nft_bandwidth_policy[NFTA_BANDWIDTH_MAX + 1] = {
 	[NFTA_BANDWIDTH_RSTTIME]	        = { .type = NLA_U64 },
 	[NFTA_BANDWIDTH_NUMINTVLSTOSAVE]    = { .type = NLA_U32 },
 	[NFTA_BANDWIDTH_LASTBACKUPTIME]	    = { .type = NLA_U64 },
+	[NFTA_BANDWIDTH_MINUTESWEST]	    = { .type = NLA_U32 },
 };
 
 static void adjust_ip_for_backwards_time_shift(char* key, void* value)
