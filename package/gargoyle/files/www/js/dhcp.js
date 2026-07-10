@@ -19,6 +19,29 @@ function saveChanges()
 	}
 	else
 	{
+		// Guardrail for the alternative-gateway trap (discussion #48 P4):
+		// clients routed through another box send their internet traffic
+		// AROUND this router, so bandwidth monitoring, quotas, restrictions
+		// and QoS silently stop applying to them. Make the user confirm that
+		// in plain language ONCE -- when the feature is being newly enabled
+		// -- not on every subsequent save of an already-confirmed setup.
+		if(document.getElementById("dhcp_use_alt_gateway").checked && document.getElementById('alt_gateway').value != defaultAltGateway)
+		{
+			var cfSection = getDhcpSection(uciOriginal);
+			var cfOpts = uciOriginal.get('dhcp', cfSection, 'dhcp_option');
+			cfOpts = (cfOpts == null || cfOpts == '') ? [] : (Array.isArray(cfOpts) ? cfOpts : [cfOpts]);
+			var cfHadAltGw = false;
+			var cfi;
+			for(cfi = 0; cfi < cfOpts.length; cfi++)
+			{
+				cfHadAltGw = cfHadAltGw || ((("" + cfOpts[cfi]).split(","))[0] == '3');
+			}
+			if( (!cfHadAltGw) && (!confirm(dhcpS.AltGWConfirm)) )
+			{
+				return;
+			}
+		}
+
 		setControlsEnabled(false, true);
 
 		var staticHostCommands = [];
@@ -55,29 +78,93 @@ function saveChanges()
 
 		uci = uciOriginal.clone();
 		uci.remove('dhcp', dhcpSection, 'ignore');
-		uci.remove('dhcp', dhcpSection, 'dhcp_option');
 		uci.set('dhcp', dhcpSection, 'interface', 'lan');
-		dhcpIds =  ['dhcp_start', ['dhcp_start','dhcp_end'], 'dhcp_lease'];
-		dhcpVisIds = ['dhcp_start', 'dhcp_end', 'dhcp_lease'];
-		dhcpPkgs = ['dhcp','dhcp','dhcp'];
-		dhcpSections = [dhcpSection,dhcpSection,dhcpSection];
-		dhcpOptions = ['start', 'limit', 'leasetime'];
+		dhcpIds =  ['dhcp_start', ['dhcp_start','dhcp_end']];
+		dhcpVisIds = ['dhcp_start', 'dhcp_end'];
+		dhcpPkgs = ['dhcp','dhcp'];
+		dhcpSections = [dhcpSection,dhcpSection];
+		dhcpOptions = ['start', 'limit'];
 
-		dhcpFunctions = [setVariableFromValue, setVariableFromCombined, setVariableFromModifiedValue];
+		dhcpFunctions = [setVariableFromValue, setVariableFromCombined];
 		limitParams =  [false, function(values){ return (parseInt(values[1]) - parseInt(values[0]) + 1); }];
-		leaseParams = [false, function(value){ return value + "m"; }];
-		dhcpParams = [false, limitParams,leaseParams];
+		dhcpParams = [false, limitParams];
 
 		setVariables(dhcpIds, dhcpVisIds, uci, dhcpPkgs, dhcpSections, dhcpOptions, dhcpFunctions, dhcpParams);
+
+		// leasetime: the field is minutes, but the stored value may use any
+		// dnsmasq suffix (h/m/s). Only rewrite when the DURATION actually
+		// changed -- an untouched page must not rewrite '12h' as '720m'
+		// (same value, different spelling), or a no-op save isn't a no-op
+		// (caught live by vnet phase 35's uci-export invariance check).
+		var newLeaseMin = parseInt(document.getElementById('dhcp_lease').value);
+		var origLease = "" + uciOriginal.get('dhcp', dhcpSection, 'leasetime');
+		var origLeaseMin = null;
+		if(origLease.match(/h$/)) { origLeaseMin = parseFloat(origLease) * 60; }
+		else if(origLease.match(/m$/)) { origLeaseMin = parseFloat(origLease); }
+		else if(origLease.match(/s$/)) { origLeaseMin = parseFloat(origLease) / 60; }
+		if(origLeaseMin == null || origLeaseMin != newLeaseMin)
+		{
+			uci.set('dhcp', dhcpSection, 'leasetime', newLeaseMin + "m");
+		}
 
 		// dnsmasq dhcp-option 3 = the "Router" (gateway) option -- lets this
 		// LAN's DHCP clients be handed a different default gateway than the
 		// router's own address, e.g. a separate upstream firewall on the same
-		// subnet. Only written when explicitly enabled and different from the
+		// subnet. dhcp_option is a general-purpose LIST in OpenWrt's schema
+		// and users set other codes in it by hand (custom DNS = 6, NTP = 42,
+		// WPAD = 252 -- the Gargoyle forum documents doing exactly this), so
+		// this page only ever manages the one "3,..." entry: everything else
+		// is read, kept, and written back untouched. (The previous version
+		// treated the whole thing as a single scalar it owned outright --
+		// every save wiped the user's other options, discussion #48 P1/P2.)
+		var origDhcpOptions = uciOriginal.get('dhcp', dhcpSection, 'dhcp_option');
+		origDhcpOptions = (origDhcpOptions == null || origDhcpOptions == '') ? [] : (Array.isArray(origDhcpOptions) ? origDhcpOptions : [origDhcpOptions]);
+		var altGwEnabled = document.getElementById("dhcp_use_alt_gateway").checked;
+		var altGwIp = document.getElementById('alt_gateway').value;
+		// Only written when explicitly enabled and different from the
 		// router's own IP (which is what clients get by default anyway).
-		if(document.getElementById("dhcp_use_alt_gateway").checked && document.getElementById('alt_gateway').value != defaultAltGateway)
+		var altGwWanted = (altGwEnabled && altGwIp != defaultAltGateway);
+		// Replace an existing "3,..." entry IN PLACE (keeping list order --
+		// remove-then-append would rewrite an unchanged config in a new
+		// order, so a no-op save wouldn't be a no-op) or drop it; append
+		// only when there was none.
+		var newDhcpOptions = [];
+		var oi;
+		for(oi = 0; oi < origDhcpOptions.length; oi++)
 		{
-			uci.set('dhcp', dhcpSection, 'dhcp_option', '3,' + subnet + document.getElementById('alt_gateway').value);
+			if( (("" + origDhcpOptions[oi]).split(","))[0] == '3' )
+			{
+				if(altGwWanted)
+				{
+					newDhcpOptions.push('3,' + altGwIp);
+					altGwWanted = false;
+				}
+			}
+			else
+			{
+				newDhcpOptions.push(origDhcpOptions[oi]);
+			}
+		}
+		if(altGwWanted)
+		{
+			newDhcpOptions.push('3,' + altGwIp);
+		}
+		var dhcpOptionsChanged = (newDhcpOptions.length != origDhcpOptions.length);
+		for(oi = 0; (!dhcpOptionsChanged) && oi < newDhcpOptions.length; oi++)
+		{
+			dhcpOptionsChanged = (newDhcpOptions[oi] != origDhcpOptions[oi]);
+		}
+		if(dhcpOptionsChanged)
+		{
+			if(newDhcpOptions.length == 0)
+			{
+				uci.remove('dhcp', dhcpSection, 'dhcp_option');
+			}
+			else
+			{
+				uci.createListOption('dhcp', dhcpSection, 'dhcp_option');
+				uci.set('dhcp', dhcpSection, 'dhcp_option', newDhcpOptions);
+			}
 		}
 
 		dhcpWillBeEnabled = true;
@@ -286,20 +373,17 @@ function resetData()
 	}
 	tableContainer.appendChild(devTable);
 
-	dhcpIds =  ['dhcp_start', 'dhcp_end', 'dhcp_lease', 'dhcp_use_alt_gateway', 'alt_gateway'];
-	dhcpPkgs = ['dhcp',['dhcp','dhcp'],'dhcp','dhcp','dhcp'];
-	dhcpSections = [dhcpSection,[dhcpSection,dhcpSection],dhcpSection,dhcpSection,dhcpSection];
-	dhcpOptions = ['start', ['start','limit'], 'leasetime', 'dhcp_option', 'dhcp_option'];
+	dhcpIds =  ['dhcp_start', 'dhcp_end', 'dhcp_lease'];
+	dhcpPkgs = ['dhcp',['dhcp','dhcp'],'dhcp'];
+	dhcpSections = [dhcpSection,[dhcpSection,dhcpSection],dhcpSection];
+	dhcpOptions = ['start', ['start','limit'], 'leasetime'];
 
-	// The router's own last IP octet -- the default/reset value for the alt
+	// The router's own full IP -- the default/reset value for the alt
 	// gateway field, and what "not actually overridden" looks like on save.
-	defaultAltGateway = ((uciOriginal.get("network", "lan", "ipaddr")).split("."))[3];
+	// (Strip any CIDR suffix: OpenWrt 24.10+ allows ipaddr='a.b.c.d/nn'.)
+	defaultAltGateway = ("" + uciOriginal.get("network", "lan", "ipaddr")).split("/")[0];
 	enabledTest = function(value){return value != 1;};
 	endCombineFunc= function(values) { return (parseInt(values[0])+parseInt(values[1])-1); };
-	// dhcp_option is a raw "<code>,<value>" dnsmasq passthrough; option 3 is
-	// the DHCP "Router" (gateway) option. Only ever true if this page (or an
-	// earlier session of it) actually wrote one.
-	useAltGatewayTest = function(v){ v = (v == null ? '' : (v.split(","))[0]); return v == '3'; };
 	leaseModFunc = function(value)
 	{
 		var leaseMinValue;
@@ -317,29 +401,41 @@ function resetData()
 		}
 		return leaseMinValue;
 	};
-	// dhcp_option's stored value is "3,<full dotted IP>" -- pull just the
-	// last octet back out for the field; blank (not a valid last octet)
-	// falls back to defaultAltGateway below.
-	GWModFunc = function(v)
-	{
-		v = (v == null ? '' : v.split(","));
-		v = (v.length < 2 ? '' : v[1].split("."));
-		v = (v.length < 4 ? '' : v[3]);
-		if(v != '')
-		{
-			v = (parseInt(v) < 1 || parseInt(v) > 254 ? '' : v);
-		}
-		return v;
-	};
-
-	dhcpParams = [100, [endCombineFunc,150],[720,leaseModFunc], useAltGatewayTest, [defaultAltGateway,GWModFunc]];
-	dhcpFunctions = [loadValueFromVariable, loadValueFromMultipleVariables, loadValueFromModifiedVariable, loadChecked, loadValueFromModifiedVariable];
+	dhcpParams = [100, [endCombineFunc,150],[720,leaseModFunc]];
+	dhcpFunctions = [loadValueFromVariable, loadValueFromMultipleVariables, loadValueFromModifiedVariable];
 
 	loadVariables(uciOriginal, dhcpIds, dhcpPkgs, dhcpSections, dhcpOptions, dhcpParams, dhcpFunctions);
+
+	// dhcp_option is a raw "<code>,<value>" dnsmasq passthrough LIST (users
+	// legitimately keep other codes in it -- DNS=6, NTP=42, WPAD=252); option
+	// 3 is the DHCP "Router" (gateway) option, and it's the only entry this
+	// page manages. Handled by hand rather than through loadVariables: the
+	// value may be a scalar (legacy) OR an array (correct OpenWrt list type),
+	// and the old scalar-only load path crashed the whole page on an array
+	// (discussion #48 P5: v.split is not a function).
+	var loadedDhcpOptions = uciOriginal.get('dhcp', dhcpSection, 'dhcp_option');
+	loadedDhcpOptions = (loadedDhcpOptions == null || loadedDhcpOptions == '') ? [] : (Array.isArray(loadedDhcpOptions) ? loadedDhcpOptions : [loadedDhcpOptions]);
+	var loadedAltGwIp = '';
+	var lgi;
+	for(lgi = 0; lgi < loadedDhcpOptions.length && loadedAltGwIp == ''; lgi++)
+	{
+		var lgEntry = "" + loadedDhcpOptions[lgi];
+		if( (lgEntry.split(","))[0] == '3' )
+		{
+			// value = everything after the first comma (a full dotted IP)
+			loadedAltGwIp = lgEntry.substring(lgEntry.indexOf(",") + 1);
+		}
+	}
+	document.getElementById("dhcp_use_alt_gateway").checked = (loadedAltGwIp != '');
+	document.getElementById("alt_gateway").value = (loadedAltGwIp != '' ? loadedAltGwIp : defaultAltGateway);
 
 	document.getElementById("dhcp_enabled").checked = dhcpEnabled;
 	setEnabled(document.getElementById('dhcp_enabled').checked);
 	enableAssociatedField(document.getElementById('dhcp_use_alt_gateway'), 'alt_gateway', defaultAltGateway);
+	// House the niche alt-gateway controls behind the page's existing
+	// Advanced-disclosure pattern; auto-expand only when one is configured.
+	setGwAdvancedVisible(loadedAltGwIp != '');
+	updateAltGwWarning();
 
 	var firewallDefaultSections = uciOriginal.getAllSectionsOfType("firewall", "defaults");
 	var blockMismatches = uciOriginal.get("firewall", firewallDefaultSections[0], "enforce_dhcp_assignments") == "1" ? true : false;
@@ -448,12 +544,19 @@ function proofreadDHCPHostName(input)
 
 function proofreadAll()
 {
-	dhcpIds = ['dhcp_start', 'dhcp_end', 'dhcp_lease', 'alt_gateway'];
-	labelIds= ['dhcp_start_label', 'dhcp_end_label', 'dhcp_lease_label', 'alt_gateway_label'];
-	functions = [validateNumeric, validateNumeric, validateNumeric, validateNumeric];
-	returnCodes = [0,0,0,0];
+	dhcpIds = ['dhcp_start', 'dhcp_end', 'dhcp_lease'];
+	labelIds= ['dhcp_start_label', 'dhcp_end_label', 'dhcp_lease_label'];
+	functions = [validateNumeric, validateNumeric, validateNumeric];
+	returnCodes = [0,0,0];
 	visibilityIds= dhcpIds;
 	errors = proofreadFields(dhcpIds, labelIds, functions, returnCodes, visibilityIds);
+	// alt_gateway is a full IP address (any subnet size -- the old
+	// last-octet-only field hardcoded a /24, discussion #48 P3), validated
+	// only when its checkbox is actually enabled.
+	if(document.getElementById("dhcp_use_alt_gateway").checked)
+	{
+		errors = errors.concat( proofreadFields(['alt_gateway'], ['alt_gateway_label'], [validateIP], [0], ['alt_gateway']) );
+	}
 
 	//test that dhcp range is within subnet
 	if(errors.length == 0 && document.getElementById("dhcp_enabled").checked)
@@ -482,13 +585,24 @@ function proofreadAll()
 
 		if(document.getElementById("dhcp_use_alt_gateway").checked)
 		{
-			var gate = parseInt(document.getElementById("alt_gateway").value );
-			var range = getSubnetRange(mask, ip);
-			if(gate <= range[0] || gate >= range[1])
+			// Full-IP validation, correct for any subnet size: the gateway
+			// must be inside the LAN subnet, not its network/broadcast
+			// address, and not inside the DHCP pool (start/limit are offsets
+			// from the subnet's network address, per OpenWrt's dhcp schema).
+			var ipToInt = function(a)
+			{
+				var p = ("" + a).split(".");
+				return ( (parseInt(p[0]) << 24) | (parseInt(p[1]) << 16) | (parseInt(p[2]) << 8) | parseInt(p[3]) ) >>> 0;
+			};
+			var gwInt = ipToInt(document.getElementById("alt_gateway").value);
+			var maskInt = ipToInt(mask);
+			var netInt = (ipToInt(ip.split("/")[0]) & maskInt) >>> 0;
+			var bcastInt = (netInt | (~maskInt >>> 0)) >>> 0;
+			if( ((gwInt & maskInt) >>> 0) != netInt || gwInt == netInt || gwInt == bcastInt )
 			{
 				errors.push(dhcpS.rangeGWErr);
 			}
-			if(gate >= start && gate <= end)
+			if(gwInt >= (netInt + start) && gwInt <= (netInt + end))
 			{
 				errors.push(dhcpS.leaseGWErr);
 			}
@@ -513,6 +627,38 @@ function toggleDeviceAdvanced()
 	var c = document.getElementById("dev_advanced_container");
 	if(!c) { return; }
 	setDeviceAdvancedVisible(c.style.display == "none");
+}
+
+// Advanced disclosure for the alternative-gateway controls (discussion #48
+// option D): 99% of users never need this, and enabling it silently routes
+// clients' internet traffic around this router (see updateAltGwWarning), so
+// it lives behind the same Show/Hide-advanced pattern the Devices modal uses.
+// All DOM lookups are null-guarded: the logic-test harness's minimal DOM
+// doesn't carry these presentation-only elements.
+function setGwAdvancedVisible(visible)
+{
+	var c = document.getElementById("gw_advanced_container");
+	var t = document.getElementById("gw_advanced_toggle");
+	if(c) { c.style.display = visible ? "" : "none"; }
+	if(t) { t.textContent = visible ? (dhcpS.HideAdvGw || "Hide advanced (alternative gateway)") : (dhcpS.ShowAdvGw || "Show advanced (alternative gateway)"); }
+}
+
+function toggleGwAdvanced()
+{
+	var c = document.getElementById("gw_advanced_container");
+	if(!c) { return; }
+	setGwAdvancedVisible(c.style.display == "none");
+}
+
+// Plain-language warning (discussion #48 P4), shown whenever the checkbox is
+// ticked: devices using the alternative gateway bypass this router entirely
+// for internet traffic, so monitoring/quotas/restrictions/QoS stop applying.
+function updateAltGwWarning()
+{
+	var w = document.getElementById("alt_gateway_warning");
+	if(!w) { return; }
+	var cb = document.getElementById("dhcp_use_alt_gateway");
+	w.style.display = (cb != null && cb.checked) ? "" : "none";
 }
 
 function populateGroupDatalist()
