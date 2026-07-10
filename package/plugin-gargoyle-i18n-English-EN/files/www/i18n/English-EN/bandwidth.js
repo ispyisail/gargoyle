@@ -65,3 +65,4 @@ bndwS.Down="Down";
 bndwS.Up="Up";
 bndwS.Sum="Sum";
 bndwS.Host="Host";
+bndwS.AltGWNotice="A DHCP alternative gateway is configured (Connection → DHCP): clients using it send their internet traffic around this router, so it does not appear in these graphs.";

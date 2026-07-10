@@ -27,6 +27,22 @@
 //-->
 </script>
 <h1 class="page-header"><%~ bandwidth.mBandwidth %></h1>
+<%
+	# When a DHCP alternative gateway (dhcp_option 3) is active, clients using
+	# it route their internet traffic around this router, so it never appears
+	# in these graphs -- surface that here so "why is my usage empty" answers
+	# itself (discussion #48 P4). uci joins list entries with spaces, so an
+	# option-3 entry is a word starting "3,".
+	alt_gw_active="0"
+	for dhcp_opt in $(uci -q get dhcp.lan.dhcp_option) ; do
+		case "$dhcp_opt" in
+			3,*) alt_gw_active="1" ;;
+		esac
+	done
+%>
+<div class="alert alert-warning" style="display:<% [ "$alt_gw_active" = "1" ] && printf block || printf none %>">
+	<%~ bandwidth.AltGWNotice %>
+</div>
 <div class="row">
 	<div class="col-lg-12">
 		<div class="panel panel-default">
