@@ -43,7 +43,11 @@ dhcpS.HideAdv="Hide advanced (IPv6 reservation)";
 dhcpS.grpErr="Group name may only contain letters, numbers, hyphen and underscore (no spaces).";
 
 dhcpS.UseAltGW="Use alternative default Gateway address";
-dhcpS.AltGW="Gateway address";
+dhcpS.AltGW="Gateway IP address";
+dhcpS.ShowAdvGw="Show advanced (alternative gateway)";
+dhcpS.HideAdvGw="Hide advanced (alternative gateway)";
+dhcpS.AltGWWarn="Devices using the alternative gateway will send their internet traffic through that device instead of this router. Bandwidth monitoring, quotas, access restrictions and QoS on this router will not apply to them.";
+dhcpS.AltGWConfirm="Devices using the alternative gateway will send their internet traffic through that device instead of this router. Bandwidth monitoring, quotas, access restrictions and QoS on this router will NOT apply to them.\n\nEnable the alternative gateway anyway?";
 dhcpS.leaseErr="Lease time must be greater than zero.";
-dhcpS.rangeGWErr="Alternative default Gateway address can't be 0 or 255 in the subnet.";
+dhcpS.rangeGWErr="Alternative Gateway address must be a usable address inside the LAN subnet.";
 dhcpS.leaseGWErr="Specified DHCP range contains the alternative Gateway address.";
