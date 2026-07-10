@@ -124,19 +124,30 @@ ipHostHash["::1"] = "localhost6";
 					</span>
 				</div>
 
-				<div id="alt_gateway_check_container" class="row form-group">
+				<div class="row form-group">
 					<span class="col-xs-12">
-						<input type="checkbox" id="dhcp_use_alt_gateway" onclick="enableAssociatedField(this, 'alt_gateway', defaultAltGateway)"/>
-						<label id="dhcp_alt_gateway_label" for="dhcp_use_alt_gateway"><%~ dhcp.UseAltGW %>:</label>
+						<a href="#" id="gw_advanced_toggle" onclick="toggleGwAdvanced();return false;">Show advanced (alternative gateway)</a>
 					</span>
 				</div>
 
-				<div id="alt_gateway_container" class="row form-group">
-					<label class="col-xs-5" for="alt_gateway" id="alt_gateway_label"><%~ dhcp.AltGW %>:</label>
-					<span class="col-xs-7">
-						<% echo -n "$subnet" %>
-						<input type="text" class="form-control" id="alt_gateway" oninput="proofreadNumeric(this)" size="5" maxlength="3" />
-					</span>
+				<div id="gw_advanced_container" style="display:none">
+					<div id="alt_gateway_check_container" class="row form-group">
+						<span class="col-xs-12">
+							<input type="checkbox" id="dhcp_use_alt_gateway" onclick="enableAssociatedField(this, 'alt_gateway', defaultAltGateway); updateAltGwWarning();"/>
+							<label id="dhcp_alt_gateway_label" for="dhcp_use_alt_gateway"><%~ dhcp.UseAltGW %>:</label>
+						</span>
+					</div>
+
+					<div id="alt_gateway_warning" class="row form-group" style="display:none">
+						<span class="col-xs-12"><em><%~ dhcp.AltGWWarn %></em></span>
+					</div>
+
+					<div id="alt_gateway_container" class="row form-group">
+						<label class="col-xs-5" for="alt_gateway" id="alt_gateway_label"><%~ dhcp.AltGW %>:</label>
+						<span class="col-xs-7">
+							<input type="text" class="form-control" id="alt_gateway" oninput="proofreadIp(this)" size="16" maxlength="15" />
+						</span>
+					</div>
 				</div>
 
 				<div id="dhcp_lease_container" class="row form-group">
