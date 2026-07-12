@@ -91,15 +91,45 @@ function saveChanges()
 		var remoteAttempts =  document.getElementById("remote_ssh_attempts").disabled ? "" : getSelectedValue("remote_ssh_attempts");
 		var oldSshPwdEnabled = uciOriginal.get("dropbear", dropbearSections[0], "PasswordAuth");
 		var sshPwdEnabled = document.getElementById("pwd_auth_enabled").checked ? "on" : "off";
+		// Consolidating to a named 'global' section drops every option this
+		// page does NOT manage (enable, RootPasswordAuth, Interface, ...) --
+		// silent SSH-config data loss on every save (GUI-hunt finding
+		// 2026-07-12). Carry unmanaged options from the section(s) being
+		// removed over to 'global'. Managed options are (re)set below.
+		var dropbearManaged = { "Port":1, "PasswordAuth":1, "max_remote_attempts":1 };
+		var dropbearCarry = {};
 		for(s = 0; s < dropbearSections.length; s++)
 		{
 			if(dropbearSections[s] != "global")
 			{
+				var dbOpts = uciOriginal.getAllOptionsInSection("dropbear", dropbearSections[s], true);
+				for(var dbi = 0; dbi < dbOpts.length; dbi++)
+				{
+					var dbKey = dbOpts[dbi].replace(/^dropbear\.[^.]+\./, "");
+					if(!dropbearManaged[dbKey] && dropbearCarry[dbKey] == null)
+					{
+						dropbearCarry[dbKey] = uciOriginal.get("dropbear", dropbearSections[s], dbKey);
+					}
+				}
 				uci.removeSection("dropbear", dropbearSections[s]);
 			}
 		}
 		//update dropbear uci configuration
 		uci.set("dropbear", "global", "", "dropbear");
+		//preserve options this page doesn't manage across the section rebuild
+		for(var dbCarryKey in dropbearCarry)
+		{
+			var dbCarryVal = dropbearCarry[dbCarryKey];
+			if(dbCarryVal instanceof Array)
+			{
+				uci.createListOption("dropbear", "global", dbCarryKey, true);
+				uci.set("dropbear", "global", dbCarryKey, dbCarryVal);
+			}
+			else
+			{
+				uci.set("dropbear", "global", dbCarryKey, dbCarryVal);
+			}
+		}
 		uci.set("dropbear", "global", "Port", localSshPort);
 		if(remoteAttempts != "") { uci.set("dropbear", "global", "max_remote_attempts",  remoteAttempts ); }
 		uci.set("dropbear", "global", "PasswordAuth", sshPwdEnabled);

@@ -201,6 +201,52 @@ function saveChanges()
 			}
 		}
 
+		// Snapshot wireguard_wg0 peer sections NOT managed by this plugin
+		// (names outside managedNames -- e.g. a road-warrior added by hand per
+		// an SSH guide). saveChanges() does removeAllSectionsOfType then
+		// rebuilds only plugin-managed peers, so without preserving these a
+		// manual peer is silently wiped on EVERY save (GUI chaos-hunt bug,
+		// 2026-07-12). Returns a list to hand to wgRestoreManualPeers() after
+		// the rebuild.
+		wgSnapshotManualPeers = function(managedNames)
+		{
+			var saved = [];
+			var secs = uci.getAllSectionsOfType("network","wireguard_wg0");
+			for(var i=0; i<secs.length; i++)
+			{
+				if(managedNames[secs[i]]) { continue; } // plugin-managed, will be rebuilt
+				var opts = uci.getAllOptionsInSection("network", secs[i], true);
+				var entry = { name: secs[i], opts: {} };
+				for(var j=0; j<opts.length; j++)
+				{
+					var okey = opts[j].replace(/^network\.[^.]+\./, "");
+					entry.opts[okey] = uci.get("network", secs[i], okey);
+				}
+				saved.push(entry);
+			}
+			return saved;
+		}
+		wgRestoreManualPeers = function(saved)
+		{
+			for(var i=0; i<saved.length; i++)
+			{
+				uci.set("network", saved[i].name, "", "wireguard_wg0");
+				for(var opt in saved[i].opts)
+				{
+					var v = saved[i].opts[opt];
+					if(v instanceof Array)
+					{
+						uci.createListOption("network", saved[i].name, opt, true);
+						uci.set("network", saved[i].name, opt, v);
+					}
+					else
+					{
+						uci.set("network", saved[i].name, opt, v);
+					}
+				}
+			}
+		}
+
 		configureAC = function(clientId,pubkey,ipArr,endpointHost,endpointPort)
 		{
 			uci.set("network", clientId, "",        "wireguard_wg0")
@@ -280,8 +326,14 @@ function saveChanges()
 			if(ip6 != "" && submask6 != "") { wgAddrs.push(ip6 + "/" + submask6); }
 			configureNetwork(true,privkey,wgAddrs,wgPort);
 
-			uci.removeAllSectionsOfType("network","wireguard_wg0");
 			wgACs = uci.getAllSectionsOfType("wireguard_gargoyle","allowed_client");
+			// Names this plugin manages (every allowed_client's id) -- anything
+			// else in wireguard_wg0 is a manual peer to preserve across the
+			// wholesale remove below.
+			var wgManaged = {};
+			for(var mIdx=0; mIdx<wgACs.length; mIdx++){ wgManaged[uci.get("wireguard_gargoyle",wgACs[mIdx],"id")] = 1; }
+			var wgManualPeers = wgSnapshotManualPeers(wgManaged);
+			uci.removeAllSectionsOfType("network","wireguard_wg0");
 			var wgACIdx = 0;
 			for(wgACIdx = 0; wgACIdx < wgACs.length; wgACIdx ++)
 			{
@@ -324,6 +376,7 @@ function saveChanges()
 					configureAC(clientId,pubkey,ipArr,null,null);
 				}
 			}
+			wgRestoreManualPeers(wgManualPeers); // re-add hand-added peers
 		}
 		if(wgConfig == "client")
 		{
@@ -350,8 +403,10 @@ function saveChanges()
 			uci.set("wireguard_gargoyle", "client", "server_port", endpoint_port)
 			var server_pubkey = document.getElementById(prefix + "server_pubkey").value;
 			uci.set("wireguard_gargoyle", "client", "server_public_key", server_pubkey)
+			var wgManualPeersC = wgSnapshotManualPeers({ "wgserver": 1 });
 			uci.removeAllSectionsOfType("network","wireguard_wg0");
 			configureAC("wgserver",server_pubkey,allowed_ips.split(','),endpoint_host,endpoint_port);
+			wgRestoreManualPeers(wgManualPeersC); // re-add hand-added peers
 		}
 
 
