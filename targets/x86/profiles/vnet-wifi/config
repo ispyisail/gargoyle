@@ -46,7 +46,6 @@ CONFIG_KERNEL_IO_URING=y
 # CONFIG_OPENSSL_WITH_MDC2 is not set
 # CONFIG_OPENSSL_WITH_SEED is not set
 # CONFIG_OPENSSL_WITH_WHIRLPOOL is not set
-# CONFIG_PACKAGE_apk-mbedtls is not set
 # CONFIG_PACKAGE_gargoyle-large is not set
 CONFIG_PACKAGE_iw=y
 CONFIG_PACKAGE_iwinfo=y
@@ -107,6 +106,7 @@ CONFIG_OPENVPN_gargoyle_mbedtls_ENABLE_LZ4=y
 # CONFIG_OPENVPN_gargoyle_mbedtls_ENABLE_MANAGEMENT is not set
 CONFIG_OPENVPN_gargoyle_mbedtls_ENABLE_PORT_SHARE=y
 CONFIG_OPENVPN_gargoyle_mbedtls_ENABLE_SMALL=y
+CONFIG_PACKAGE_apk-mbedtls=y
 CONFIG_PACKAGE_badblocks=y
 CONFIG_PACKAGE_blkid=y
 CONFIG_PACKAGE_block-mount=y
