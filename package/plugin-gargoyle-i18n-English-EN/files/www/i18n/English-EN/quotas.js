@@ -80,3 +80,4 @@ quotasStr.ResetUsage="Reset Usage Now";
 quotasStr.ResetConfirm="Reset this quota usage to zero now?";
 quotasStr.ResetDone="Quota usage has been reset to zero.";
 quotasStr.SetQuotaHint="Sets the data <b>used so far</b> (the running meter, not the limit). Tick a box, enter a value, use <b>0</b> to reset.";
+quotasStr.AltGWNotice="A DHCP alternative gateway is configured (Connection → DHCP): clients using it send their internet traffic around this router, so quotas do not apply to them.";

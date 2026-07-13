@@ -26,15 +26,18 @@ set_version_variables()
 {
 
 	#openwrt branch
-	branch_name="24.10"
-	branch_id="openwrt-24.10"
-	packages_branch="openwrt-24.10"
+	branch_name="25.12"
+	branch_id="openwrt-25.12"
+	packages_branch="openwrt-25.12"
 
 
-	# set precise commit in repo to use 
-	# you can set this to an alternate commit 
+	# set precise commit in repo to use
+	# you can set this to an alternate commit
 	# or empty to checkout latest
-	openwrt_commit="95d0ca014c4ce5e225579f859c066dc74a20763b"
+	# pinned to the v25.12.5 tag's commit (not branch head) for
+	# reproducibility, same convention as the prior 24.10 pin -- see
+	# docs/openwrt-2512-bump-plan.md/-progress.md in gargoyle-tools
+	openwrt_commit="f0a60eee2fe051741c643ea6118718aae1ef17fb"
 	openwrt_abbrev_commit=$( echo "$openwrt_commit" | cut -b 1-7 )
 	
 
@@ -763,7 +766,11 @@ for target in $targets ; do
 		make $num_build_thread_str V=s GARGOYLE_VERSION="$numeric_gargoyle_version" GARGOYLE_VERSION_NAME="$lower_short_gargoyle_version" GARGOYLE_PROFILE="$default_profile"
 
 	fi
-	
+	make_exit=$?
+	if [ "$make_exit" != "0" ] ; then
+		bail_on_error "OpenWrt make failed (exit $make_exit) for $target/$default_profile -- re-run 'make V=s' in $target-src to see the failing package"
+	fi
+
 	if [ "$distribution" = "true" ] || [ "$distribution" = "TRUE" ] || [ "$distribution" = "1" ] ; then
 		distribution="true"
 		distrib_init
@@ -834,9 +841,11 @@ for target in $targets ; do
 	copy_buildinfo "$openwrt_target" "$subtarget_arch" "$target" "$default_profile"
 	copy_sha256sums "$openwrt_target" "$subtarget_arch" "$target" "$default_profile"
 
-	#if we didn't build anything, die horribly
+	#if we didn't build anything, die horribly -- and say why, this used to
+	#exit silently and made real build failures look like the script just
+	#stopped for no reason
 	if [ -z "$image_files" ] ; then
-		exit
+		bail_on_error "no image files in bin/targets/$arch/$subtarget_arch after build -- the make above likely failed partway; re-run 'make V=s' in $target-src to see the failing package"
 	fi
 	
 	if [ "$distribution" = "true" ] ; then
@@ -891,11 +900,15 @@ for target in $targets ; do
 		else
 			make $num_build_thread_str V=s GARGOYLE_VERSION="$numeric_gargoyle_version" GARGOYLE_VERSION_NAME="$lower_short_gargoyle_version" GARGOYLE_PROFILE="$profile_name"
 		fi
+		make_exit=$?
+		if [ "$make_exit" != "0" ] ; then
+			bail_on_error "OpenWrt make failed (exit $make_exit) for $target/$profile_name -- re-run 'make V=s' in $target-src to see the failing package"
+		fi
 
-		#if we didn't build anything, die horribly
+		#if we didn't build anything, die horribly -- and say why
 		image_files=$(find "bin/targets/$arch/" 2>/dev/null)
 		if [ -z "$image_files" ] ; then
-			exit
+			bail_on_error "no image files in bin/targets/$arch/ after build of profile $profile_name -- the make above likely failed partway; re-run 'make V=s' in $target-src to see the failing package"
 		fi
 
 		#copy packages to build/target directory

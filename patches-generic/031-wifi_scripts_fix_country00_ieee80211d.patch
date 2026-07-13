@@ -1,0 +1,23 @@
+--- a/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/hostapd.uc
++++ b/package/network/config/wifi-scripts/files-ucode/usr/share/ucode/wifi/hostapd.uc
+@@ -72,7 +72,19 @@
+ 		config.country_code = radio.config.country;
+ 	}
+
+-	if (!exists(config, 'country_code'))
++	/* '00' is cfg80211's generic/"world" regulatory-domain placeholder,
++	 * not a real ISO 3166-1 alpha2 code. hostapd has rejected any
++	 * country_code with characters outside A-Z at config-parse time
++	 * since 2.10 (2022), independent of ieee80211d -- one bad line
++	 * fails the whole config load. What is new in this release is the
++	 * generation side: radios left at their out-of-the-box default end
++	 * up with country '00' in UCI, and the schema
++	 * (wireless.wifi-device.json) aliases 'country' straight onto
++	 * 'country_code', so this function hands hostapd a config it
++	 * refuses. netifd's global hostapd daemon surfaces that as a
++	 * silently half-configured AP (no channel, no beacons) instead of
++	 * a startup error. Treat the placeholder the same as unset. */
++	if (!exists(config, 'country_code') || config.country_code == '00')
+ 		return;
+
+ 	if (config.hw_mode != 'a')
