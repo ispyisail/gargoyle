@@ -1308,6 +1308,7 @@ function saveChanges()
 			adjustIpCommands = "\nsh /usr/lib/gargoyle/update_router_ip.sh " + oldLanIp + "  " + currentLanIp;
 		}
 
+		forceCidrDerivedNetmaskEmission(uciCompare, cidrDerivedNetmaskSections);
 		var commands = uci.getScriptCommands(uciCompare);
 		var restartNetworkCommand = (wirelessDriver== "broadcom" ? "\niwconfig wl0 txpower 31\n" : "") + "sh /usr/lib/gargoyle/restart_network.sh ;\n" ;
 		if(doReboot)
@@ -2062,6 +2063,76 @@ function localdate(ldate)
 	return ldateStr;
 }
 
+// Convert a CIDR prefix length (e.g. "24") to a dotted-quad netmask
+// (e.g. "255.255.255.0"). Returns null for an out-of-range prefix.
+function cidrPrefixToNetmask(prefix)
+{
+	prefix = parseInt(prefix, 10);
+	if(isNaN(prefix) || prefix < 0 || prefix > 32) { return null; }
+	var octets = [];
+	var pIndex;
+	for(pIndex = 0; pIndex < 4; pIndex++)
+	{
+		var bits = prefix >= 8 ? 8 : (prefix > 0 ? prefix : 0);
+		octets.push(256 - Math.pow(2, 8 - bits));
+		prefix -= bits;
+	}
+	return octets.join(".");
+}
+
+// OpenWrt 24.10+ stores interface addresses in CIDR form
+// (network.<section>.ipaddr = '192.168.1.1/24') with no separate netmask
+// option. Gargoyle's Basic-page IP fields expect a bare dotted-quad ipaddr
+// plus a separate netmask, so validateIP() rejects the raw '192.168.1.1/24'
+// value on load -- the Router IP field shows red and the page can't be saved.
+// Split any CIDR-form ipaddr back into the two-field form the UI works with.
+// Idempotent: a bare ipaddr (no '/') is left untouched, so it's safe to call
+// on every resetData() and against configs that already use the split form.
+function normalizeCidrIpaddr(uci, section)
+{
+	var addr = uci.get("network", section, "ipaddr");
+	if(addr == null || addr.indexOf("/") < 0) { return; }
+	var parts = addr.split("/");
+	uci.set("network", section, "ipaddr", parts[0]);
+	// Only derive a netmask when one isn't already set explicitly.
+	if(uci.get("network", section, "netmask") == "")
+	{
+		// The suffix may be a prefix length ("24") or already a dotted mask.
+		var mask = parts[1].indexOf(".") >= 0 ? parts[1] : cidrPrefixToNetmask(parts[1]);
+		if(mask != null)
+		{
+			uci.set("network", section, "netmask", mask);
+			// Remember that this netmask exists only in our client-side
+			// model, NOT in the router's real config -- saveChanges() must
+			// not let it suppress the save diff (see
+			// forceCidrDerivedNetmaskEmission).
+			cidrDerivedNetmaskSections[section] = true;
+		}
+	}
+}
+
+// Sections whose netmask was derived client-side by normalizeCidrIpaddr()
+// because the router stores the address in CIDR form with no netmask option.
+var cidrDerivedNetmaskSections = {};
+
+function forceCidrDerivedNetmaskEmission(uciCompare, derivedSections)
+{
+	// The compare baseline was normalized at load, so a derived netmask sits
+	// on BOTH sides of the save diff and is never written to the router. On
+	// a router whose config has no netmask option, saving a bare new ipaddr
+	// then brings the LAN up as a /32 with no route -- the router answers
+	// ARP but nothing else (real incident, 2026-07-12). Removing the derived
+	// netmask from the baseline makes every save write it out explicitly.
+	var s;
+	for(s in derivedSections)
+	{
+		if(derivedSections[s])
+		{
+			uciCompare.remove("network", s, "netmask");
+		}
+	}
+}
+
 function resetData()
 {
 	wanMacLoc = defaultWanIf != "" ? ("wan_" + defaultWanIf.replace(".","_") + "_dev"): wanMacLoc;
@@ -2128,6 +2199,13 @@ function resetData()
 
 	setChildText("bridge_wifi_mac",  currentWirelessMacs[0], null, null, null);
 	setChildText("wifi_mac", currentWirelessMacs[0], null, null, null);
+
+	// Normalize CIDR-form ipaddr (OpenWrt 24.10+) into the bare-ipaddr +
+	// separate-netmask form every IP field / comparison below assumes. Done on
+	// uciOriginal so it also flows into saveChanges()'s uciOriginal.clone(),
+	// keeping the save diff clean. Idempotent, so re-running resetData is safe.
+	normalizeCidrIpaddr(uciOriginal, "lan");
+	normalizeCidrIpaddr(uciOriginal, "wan");
 
 	var confIsBridge = isBridge(uciOriginal);
 	var confIsGateway = !confIsBridge;

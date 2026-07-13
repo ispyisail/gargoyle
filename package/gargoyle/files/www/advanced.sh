@@ -21,7 +21,7 @@
 
 	echo "var countryLines = new Array();"
 	if [ -e ./data/countrylist.txt ] ; then
-		awk '{gsub(/"/, "\\\""); print "countryLines.push(\""$0"\");"}' ./data/countrylist.txt	
+		sed 's/\\/\\\\/g; s/"/\\"/g' ./data/countrylist.txt | awk '{print "countryLines.push(\""$0"\");"}'
 	fi
 
 	echo "var num_cpus=$(grep -c processor /proc/cpuinfo);"

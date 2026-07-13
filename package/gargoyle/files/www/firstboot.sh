@@ -17,7 +17,7 @@
 
 	echo "var timezoneLines = new Array();"
 	if [ -e ./data/timezones.txt ] ; then
-		awk '{gsub(/"/, "\\\""); print "timezoneLines.push(\""$0"\");"}' ./data/timezones.txt
+		sed 's/\\/\\\\/g; s/"/\\"/g' ./data/timezones.txt | awk '{print "timezoneLines.push(\""$0"\");"}'
 	fi
 	echo "var timezoneData = parseTimezones(timezoneLines);"
 %>

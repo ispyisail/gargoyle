@@ -11,7 +11,7 @@
 <%
 	echo "var cron_data = new Array();"
 	if [ -e /etc/crontabs/root ] ; then
-		awk '{gsub(/"/, "\\\""); print "cron_data.push(\""$0"\");" }' /etc/crontabs/root
+		sed 's/\\/\\\\/g; s/"/\\"/g' /etc/crontabs/root | awk '{print "cron_data.push(\""$0"\");" }'
 	fi
 	echo "var weekly_time=\"`date \"+%w-%H-%M\"`\";"
 
