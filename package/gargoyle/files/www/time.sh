@@ -13,7 +13,11 @@
 <%
 	echo "var timezoneLines = new Array();"
 	if [ -e ./data/timezones.txt ] ; then
-		awk '{gsub(/"/, "\\\""); print "timezoneLines.push(\""$0"\");"}' ./data/timezones.txt
+		# Escape with sed (consistent everywhere), not awk gsub -- busybox awk
+		# (what the firmware ships) handles backslashes in gsub's replacement
+		# string differently from gawk, leaving the quotes unescaped and
+		# producing invalid JS that breaks the whole inline <script>.
+		sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' ./data/timezones.txt | awk '{print "timezoneLines.push(\""$0"\");"}'
 	fi
 	echo "var timezoneData = parseTimezones(timezoneLines);"
 
