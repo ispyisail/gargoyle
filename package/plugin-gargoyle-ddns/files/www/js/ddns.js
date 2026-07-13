@@ -29,7 +29,16 @@ function saveChanges()
 
 
 
+	// Diffing against an empty container re-emits EVERY loaded uci key (all of
+	// gargoyle.global/display/status/...), which on save reverts any unrelated
+	// setting another browser tab changed -- e.g. the theme or session timeout
+	// (GUI chaos-hunt bug, 2026-07-12). The delete-then-recreate strategy above
+	// only clears ddns_gargoyle, so we only need to recreate ddns_gargoyle;
+	// scope the emitted set commands to that package (keep the trailing commit).
 	createCommands = uci.getScriptCommands(new UCIContainer());
+	createCommands = createCommands.split("\n").filter(function(line){
+		return line.indexOf("ddns_gargoyle") >= 0 || line == "uci commit" || line == "";
+	}).join("\n");
 	testCommands = ["/etc/init.d/ddns_gargoyle stop", "/etc/init.d/ddns_gargoyle test_config"];
 
 
