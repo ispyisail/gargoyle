@@ -2054,6 +2054,18 @@ function validateSsid(ssid)
 {
 	return validateLengthRange(ssid, 1, 32)
 }
+function validateHostName(name)
+{
+	// One or more dot-separated DNS labels (RFC1123): letters/digits/hyphen,
+	// no leading/trailing hyphen, each label 1-63 chars. Returns 0 = valid.
+	// Rejects whitespace, newlines, quotes and shell/dnsmasq metacharacters --
+	// these otherwise reach a raw shell command (the hostname is echoed into
+	// /proc/sys/kernel/hostname) or inject lines into the generated
+	// dnsmasq.conf (the domain becomes a `domain=` line). A newline in the
+	// domain was shown live to inject arbitrary dnsmasq directives.
+	if(name == null) { return 1; }
+	return name.match(/^[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)*$/) ? 0 : 1;
+}
 function proofreadSsid(input)
 {
 	proofreadText(input, validateSsid, 0);
