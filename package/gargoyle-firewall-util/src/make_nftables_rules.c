@@ -854,29 +854,38 @@ char*** parse_ips_and_macs(char* addr_str)
 			int macaddr[6];
 			if(sscanf(next_str, "%2x:%2x:%2x:%2x:%2x:%2x", macaddr, macaddr+1, macaddr+2, macaddr+3, macaddr+4, macaddr+5) == 6)
 			{
-				push_list(mac_list, trim_flanking_whitespace(next_str));
+				push_list(mac_list, strdup(trim_flanking_whitespace(next_str)));
 			}
 		}
 
 		if(strchr(next_str, '-') != NULL)
 		{
 			char** range_parts = split_on_separators(next_str, "-", 1, 2, 1, &num_pieces);
-			char* start = trim_flanking_whitespace(range_parts[0]);
-			char* end = trim_flanking_whitespace(range_parts[1]);
-			
-			char start_ip[16];
-			char end_ip[16];
-			if(inet_pton(AF_INET6, start, start_ip) && inet_pton(AF_INET6, end, end_ip))
+			/* A dangling '-' (e.g. "10.0.0.1-", "-5", or "-") splits into fewer
+			 * than two pieces, so range_parts[1] (or [0]) is NULL. Only treat it
+			 * as a range when both endpoints are actually present; otherwise it
+			 * is malformed input -- skip it rather than deref a NULL. */
+			if(num_pieces >= 2 && range_parts[0] != NULL && range_parts[1] != NULL)
 			{
-				push_list(ip6_list, trim_flanking_whitespace(next_str));
-			}
-			else if(inet_pton(AF_INET, start, start_ip) && inet_pton(AF_INET, end, end_ip))
-			{
-				push_list(ip_list, trim_flanking_whitespace(next_str));
-			}
+				char* start = trim_flanking_whitespace(range_parts[0]);
+				char* end = trim_flanking_whitespace(range_parts[1]);
 
-			free(start);
-			free(end);
+				char start_ip[16];
+				char end_ip[16];
+				if(inet_pton(AF_INET6, start, start_ip) && inet_pton(AF_INET6, end, end_ip))
+				{
+					push_list(ip6_list, strdup(trim_flanking_whitespace(next_str)));
+				}
+				else if(inet_pton(AF_INET, start, start_ip) && inet_pton(AF_INET, end, end_ip))
+				{
+					push_list(ip_list, strdup(trim_flanking_whitespace(next_str)));
+				}
+			}
+			unsigned long rp;
+			for(rp = 0; range_parts[rp] != NULL; rp++)
+			{
+				free(range_parts[rp]);
+			}
 			free(range_parts);
 		}
 		else
@@ -884,16 +893,19 @@ char*** parse_ips_and_macs(char* addr_str)
 			char parsed_ip[16];
 			if(inet_pton(AF_INET6, next_str, parsed_ip) == 1)
 			{
-				push_list(ip6_list, trim_flanking_whitespace(next_str));
+				push_list(ip6_list, strdup(trim_flanking_whitespace(next_str)));
 			}
 			else if(inet_pton(AF_INET, next_str, parsed_ip) == 1)
 			{
-				push_list(ip_list, trim_flanking_whitespace(next_str));
+				push_list(ip_list, strdup(trim_flanking_whitespace(next_str)));
 			}
 		}
 		
 	}
-	free(addr_parts);
+	/* the lists hold their own strdup'd copies, so free every addr_parts piece
+	 * here -- including GROUP: / unrecognised / malformed-range tokens that were
+	 * never pushed to a list and would otherwise leak. */
+	free_null_terminated_string_array(addr_parts);
 
 	char*** return_value = (char***)malloc(3*sizeof(char**));
 
@@ -929,6 +941,12 @@ char*** parse_ips_and_macs(char* addr_str)
 
 	if(num_plain_ip + num_set_refs + num2 + num3 == 0)
 	{
+		/* nothing matched: free the pieces that would otherwise leak on this
+		 * path (set_ref_strs is empty-but-allocated; the join results too). */
+		free(set_ref_strs);
+		free(match_plain_ip_str);
+		free(match_ip6_str);
+		free(match_mac_str);
 		free(return_value);
 		return_value = NULL;
 	}
@@ -960,6 +978,9 @@ char*** parse_ips_and_macs(char* addr_str)
 			ip_return[ip_idx++] = set_ref_strs[sr];
 		}
 		ip_return[ip_idx] = NULL;
+		/* the @setname strings now belong to ip_return; free just the array
+		 * container returned by destroy_list (it was otherwise leaked). */
+		free(set_ref_strs);
 
 		return_value[MATCH_IP_INDEX]  = ip_return;
 		return_value[MATCH_IP6_INDEX] = (char**)malloc(2*sizeof(char*));
