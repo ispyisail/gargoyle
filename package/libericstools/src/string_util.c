@@ -398,6 +398,15 @@ char* dynamic_replace(char* template_str, char* old, char* new)
 	int newlen = strlen(new);
 	int oldlen = strlen(old);
 
+	if(oldlen == 0)
+	{
+		/* An empty `old` makes strstr() match at the cursor on every iteration
+		 * while the cursor advances by strlen(old)==0, so both the count loop
+		 * and the copy loop spin forever. Nothing to replace: hand back a copy
+		 * of the template unchanged. */
+		return strdup(template_str);
+	}
+
 	char* dyn_template = strdup(template_str);
 	char* s = dyn_template;
 	for (i = 0; s[i] != '\0'; i++)
