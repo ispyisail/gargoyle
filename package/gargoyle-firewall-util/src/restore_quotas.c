@@ -1249,13 +1249,19 @@ int get_ipstr_family(char* ip_str)
 	unsigned long num_ips = 0;
 	char** ip_list = split_on_separators(ip_str, ip_breaks, 1, -1, 0, &num_ips);
 	//Always test first IP. This covers the single and range cases.
-	ret = inet_pton(AF_INET6, ip_list[0], &ipaddr);
-	if(ret == 1)
+	// A leading '-' or an empty string yields no first piece, so guard against
+	// a NULL ip_list[0] instead of passing it to inet_pton.
+	if(num_ips > 0 && ip_list[0] != NULL)
 	{
-		// Assume failure means IP is IPv4. If we are getting bad IPs passed in here that is a whole different problem...
-		retVal = 6;
+		ret = inet_pton(AF_INET6, ip_list[0], &ipaddr);
+		if(ret == 1)
+		{
+			// Assume failure means IP is IPv4. If we are getting bad IPs passed in here that is a whole different problem...
+			retVal = 6;
+		}
 	}
-	
+	free_null_terminated_string_array(ip_list);
+
 	return retVal;
 }
 
