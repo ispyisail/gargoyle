@@ -2091,9 +2091,16 @@ function cidrPrefixToNetmask(prefix)
 function normalizeCidrIpaddr(uci, section)
 {
 	var addr = uci.get("network", section, "ipaddr");
-	if(addr == null || addr.indexOf("/") < 0) { return; }
-	var parts = addr.split("/");
-	uci.set("network", section, "ipaddr", parts[0]);
+	if(addr == null) { return; }
+	// ipaddr may be stored as a UCI list (an array, e.g. ['192.168.1.1/24'])
+	// or as a scalar string, depending on how the config was written. Operate
+	// on the first address either way, and write it back in the same shape so
+	// the save diff stays clean.
+	var addrIsArray = Array.isArray(addr);
+	var addrStr = addrIsArray ? addr[0] : addr;
+	if(addrStr == null || typeof addrStr != "string" || addrStr.indexOf("/") < 0) { return; }
+	var parts = addrStr.split("/");
+	uci.set("network", section, "ipaddr", addrIsArray ? [parts[0]] : parts[0]);
 	// Only derive a netmask when one isn't already set explicitly.
 	if(uci.get("network", section, "netmask") == "")
 	{
