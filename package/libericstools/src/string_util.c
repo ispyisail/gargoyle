@@ -305,7 +305,16 @@ char** split_on_separators(char* line, char* separators, int num_separators, int
 				int sep_index;
 				for(sep_index =0; separator_found == 0 && sep_index < num_separators; sep_index++)
 				{
-					separator_found = separators[sep_index] == start[first_separator_index] || start[first_separator_index] == '\0' ? 1 : 0;
+					separator_found = separators[sep_index] == start[first_separator_index] ? 1 : 0;
+				}
+				/* The end of the string always terminates the current piece.
+				 * Check it here rather than inside the per-separator loop above,
+				 * so an empty separator list (num_separators == 0, which skips
+				 * that loop entirely) can't scan past the buffer end and overflow
+				 * first_separator_index. */
+				if(start[first_separator_index] == '\0')
+				{
+					separator_found = 1;
 				}
 				if(separator_found == 0)
 				{
@@ -397,6 +406,15 @@ char* dynamic_replace(char* template_str, char* old, char* new)
 	int i, count = 0;
 	int newlen = strlen(new);
 	int oldlen = strlen(old);
+
+	if(oldlen == 0)
+	{
+		/* An empty `old` makes strstr() match at the cursor on every iteration
+		 * while the cursor advances by strlen(old)==0, so both the count loop
+		 * and the copy loop spin forever. Nothing to replace: hand back a copy
+		 * of the template unchanged. */
+		return strdup(template_str);
+	}
 
 	char* dyn_template = strdup(template_str);
 	char* s = dyn_template;
