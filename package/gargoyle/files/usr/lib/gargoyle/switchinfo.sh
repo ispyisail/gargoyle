@@ -65,7 +65,13 @@ if [ -n "$PORTSTEST" ]; then
 					json_get_var PORTNAME $PORT
 					STATUS=$(get_status_speed "$PORTNAME")
 					VLANMEMBERSHIP=$(get_vlan_membership "$PORTNAME" | tr '\n' ' ' | sed 's/ *$//')
-					echo "ports.push([\"LAN${PORTNAME:3}\",\"$STATUS\",\"$VLANMEMBERSHIP\"]);"
+					# 4th element is the REAL bridge device name (e.g. lan2). The
+					# 1st stays the friendly "LAN2" label for display (overview.sh),
+					# but vlan.js must build bridge-vlan port lists from the actual
+					# device name -- "LAN2" != "lan2" and interface names are
+					# case-sensitive, so using the label as the device left VLAN 1
+					# with no valid ports and locked the router out on save.
+					echo "ports.push([\"LAN${PORTNAME:3}\",\"$STATUS\",\"$VLANMEMBERSHIP\",\"$PORTNAME\"]);"
 				done
 			json_select ..
 		json_select ..

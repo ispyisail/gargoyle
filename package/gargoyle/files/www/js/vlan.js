@@ -207,7 +207,14 @@ function parsePortAssignmentsFromUci()
 {
 	if(typeof ports === 'undefined') { return []; }
 	return ports.map(function(p) {
-		var name = p[0], status = p[1], membership = p[2] || '';
+		// p[0] is a friendly display label ("LAN2"); p[3] is the REAL bridge
+		// device name ("lan2"). The device name is what must go into the
+		// bridge-vlan `ports` list -- interface names are case-sensitive, so
+		// using the label there leaves VLAN 1 with no valid ports and locks the
+		// router out on save. Fall back to p[0] for hardware paths that don't
+		// emit a separate device name.
+		var label = p[0], status = p[1], membership = p[2] || '';
+		var device = (p[3] != null && p[3] !== '') ? p[3] : p[0];
 		var native = 'lan';
 		var tagged = [];
 		membership.split(/\s+/).forEach(function(tok) {
@@ -217,7 +224,7 @@ function parsePortAssignmentsFromUci()
 			if(kind == 'u') { native = (vid == '1') ? 'lan' : vid; }
 			else if(kind == 't' && vid != '1') { tagged.push(vid); }
 		});
-		return {name: name, status: status, native: native, tagged: tagged};
+		return {name: device, label: label, status: status, native: native, tagged: tagged};
 	});
 }
 
@@ -338,7 +345,7 @@ function renderPortsTable()
 			p.tagged = Array.prototype.filter.call(this.options, function(o){ return o.selected; }).map(function(o){ return o.value; });
 		};
 
-		return [p.name, p.status, nativeSelect, taggedSelect];
+		return [p.label || p.name, p.status, nativeSelect, taggedSelect];
 	});
 
 	var table = createTable([vlanStr.PortCol, vlanStr.StatusCol, vlanStr.NativeCol, vlanStr.TaggedCol], rows, "vlan_ports_table", false, false);
