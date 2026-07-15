@@ -445,6 +445,67 @@ function onPinholeRowRemoved(table, row)
 
 // ---- add / validate ----
 
+// A VLAN name is an optional display label (stored as gargoyle_desc). Keep it
+// optional, but reject characters that could break config generation or the UI
+// -- allow a friendly set (letters, digits, space, dot, hyphen, underscore),
+// 1-32 chars. Returns 0 = valid (matches the proofreadText convention).
+function validateVlanName(name)
+{
+	if(name == null || name == "") { return 0; }
+	return /^[A-Za-z0-9 ._\-]{1,32}$/.test(name) ? 0 : 1;
+}
+
+// Live validator for the Subnet field: turn the text red when it holds a
+// non-empty value that isn't a subnet addVlan() would accept. Empty is left
+// neutral (the Add button reports the missing subnet). Mirrors proofreadText's
+// red/no-red behaviour but reuses parseVlanSubnetCidr for the real rule.
+function proofreadVlanSubnet(input)
+{
+	if(input.disabled == true) { return; }
+	var v = input.value;
+	var ok = (v == "") || parseVlanSubnetCidr(v).ok;
+	input.style.color = ok ? "" : "red";
+}
+
+// Auto-suggest a subnet from the VLAN ID so a VLAN can be created by number
+// alone (the subnet is required, but making the user derive one by hand is
+// friction). Fills the Subnet field with 192.168.<id>.0/24 only while the
+// field is empty or still holds a previous suggestion -- it never overwrites a
+// subnet the user typed themselves, and the suggested value stays editable.
+// The overlap/format checks in addVlan() still validate whatever ends up there.
+function suggestVlanSubnet(idField)
+{
+	var subnetField = document.getElementById('add_vlan_subnet');
+	if(subnetField == null) { return; }
+	var prevSuggestion = subnetField.getAttribute('data-suggested');
+	// Only manage the field if it's empty or unchanged from our last suggestion.
+	if(subnetField.value != "" && subnetField.value != prevSuggestion) { return; }
+	var id = idField.value;
+	if(/^[0-9]+$/.test(id))
+	{
+		var n = parseInt(id, 10);
+		// 192.168.<id>.0/24 only makes sense while <id> fits a single octet;
+		// for larger VLAN IDs leave the subnet for the user to enter.
+		if(n >= 2 && n <= 254)
+		{
+			var suggestion = "192.168." + n + ".0/24";
+			subnetField.value = suggestion;
+			subnetField.setAttribute('data-suggested', suggestion);
+			// setting .value programmatically doesn't fire oninput, so run the
+			// subnet proofread here to clear any stale red styling.
+			proofreadVlanSubnet(subnetField);
+			return;
+		}
+	}
+	// ID no longer yields a suggestion (empty or > 254): clear the field only
+	// if it still held our suggestion, so the user is left with a blank to fill.
+	if(subnetField.value == prevSuggestion)
+	{
+		subnetField.value = "";
+		subnetField.removeAttribute('data-suggested');
+	}
+}
+
 function addVlan()
 {
 	var idField = document.getElementById('add_vlan_id');
@@ -504,6 +565,7 @@ function addVlan()
 	idField.value = "";
 	nameField.value = "";
 	subnetField.value = "";
+	subnetField.removeAttribute('data-suggested');
 	dhcpField.checked = true;
 
 	renderVlanDefsTable();
