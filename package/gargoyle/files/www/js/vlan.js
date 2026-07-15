@@ -886,9 +886,14 @@ function saveChanges()
 
 	var onApplied = function(req)
 	{
-		uciOriginal = uci.clone();
-		resetData();
+		// Drop the full-page "please wait" overlay FIRST. safeApplyRun has just
+		// opened the confirm modal on top of the page; if we re-render before
+		// clearing the overlay and resetData() throws, the overlay stays up and
+		// the modal's Keep-Settings button is unclickable behind it. Clearing it
+		// first guarantees the confirm dialog is usable regardless.
 		setControlsEnabled(true);
+		uciOriginal = uci.clone();
+		try { resetData(); } catch(e) { /* page stays usable; the save is what matters */ }
 	}
 	safeApplyRun(commands, {timeout: 60, onApplied: onApplied});
 }

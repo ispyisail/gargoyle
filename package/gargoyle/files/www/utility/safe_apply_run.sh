@@ -39,15 +39,40 @@
 
 		tmp_file="/tmp/safe_apply_${id}.sh"
 		printf "%s" "$FORM_commands" | tr -d "\r" > "$tmp_file"
-		sh "$tmp_file"
-		rm -f "$tmp_file"
 
-		start-stop-daemon -S -b -x /usr/lib/gargoyle/safe_apply.sh -- watchdog "$id" "$timeout"
+		# Build a detached apply script. The posted commands can restart the
+		# network (restart_network.sh runs `ifdown -a`), which severs THIS HTTP
+		# connection. The first line closes all inherited descriptors -- crucially
+		# stdout, which is the socket to the browser -- so applying in the
+		# background does not hold that connection open. The sleep lets the
+		# apply_id response below reach the browser before the network blips.
+		apply_file="/tmp/safe_apply_apply_${id}.sh"
+		{
+			echo '#!/bin/sh'
+			echo 'exec >/dev/null 2>&1 </dev/null'
+			echo 'sleep 2'
+			echo "sh \"$tmp_file\""
+			echo "rm -f \"$tmp_file\" \"$apply_file\""
+		} > "$apply_file"
+		chmod +x "$apply_file"
 
+		# Reply to the browser FIRST, then launch the detached apply + watchdog
+		# with their descriptors redirected off the socket so the CGI response
+		# actually flushes.
 		flock -u 9
 
 		echo "apply_id=$id"
 		echo "timeout=$timeout"
+
+		# Launch the apply by its OWN unique path, NOT `-x /bin/sh`. `-S` refuses
+		# to start when a process already matches `-x`, and in this CGI context
+		# /bin/sh is always running (haserl's own shell children), so `-x /bin/sh`
+		# returns 1 and the apply silently never runs -- the save then appears to
+		# confirm in the browser but nothing is ever committed. Matching the
+		# unique apply_file path (exactly as the watchdog matches its own script
+		# path below) is what makes the detached apply actually start.
+		start-stop-daemon -S -b -x "$apply_file" </dev/null >/dev/null 2>&1
+		start-stop-daemon -S -b -x /usr/lib/gargoyle/safe_apply.sh -- watchdog "$id" "$timeout" </dev/null >/dev/null 2>&1
 	else
 		echo "Failure: no commands"
 	fi
