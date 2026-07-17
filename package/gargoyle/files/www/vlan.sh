@@ -59,9 +59,9 @@
 				<div class="panel-body">
 					<div id="vlan_defs_table_container" class="table-responsive"></div>
 					<div class="row form-group">
-						<span class="col-xs-2"><input type="text" id="add_vlan_id" class="form-control" oninput="proofreadNumeric(this)" placeholder="<%~ vlan.IdCol %>" size="6" maxlength="4"/></span>
-						<span class="col-xs-3"><input type="text" id="add_vlan_name" class="form-control" placeholder="<%~ vlan.NameCol %>"/></span>
-						<span class="col-xs-3"><input type="text" id="add_vlan_subnet" class="form-control" placeholder="<%~ vlan.SubnetPlaceholder %>"/></span>
+						<span class="col-xs-2"><input type="text" id="add_vlan_id" class="form-control" oninput="proofreadNumeric(this); suggestVlanSubnet(this)" placeholder="<%~ vlan.IdCol %>" size="6" maxlength="4"/></span>
+						<span class="col-xs-3"><input type="text" id="add_vlan_name" class="form-control" oninput="proofreadText(this, validateVlanName, 0)" placeholder="<%~ vlan.NameCol %>"/></span>
+						<span class="col-xs-3"><input type="text" id="add_vlan_subnet" class="form-control" oninput="proofreadVlanSubnet(this)" placeholder="<%~ vlan.SubnetPlaceholder %>"/></span>
 						<span class="col-xs-2">
 							<input type="checkbox" id="add_vlan_dhcp" checked="checked"/>
 							<label class="short-left-pad" for="add_vlan_dhcp"><%~ vlan.DhcpCol %></label>

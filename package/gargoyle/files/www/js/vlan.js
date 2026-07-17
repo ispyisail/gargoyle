@@ -207,7 +207,14 @@ function parsePortAssignmentsFromUci()
 {
 	if(typeof ports === 'undefined') { return []; }
 	return ports.map(function(p) {
-		var name = p[0], status = p[1], membership = p[2] || '';
+		// p[0] is a friendly display label ("LAN2"); p[3] is the REAL bridge
+		// device name ("lan2"). The device name is what must go into the
+		// bridge-vlan `ports` list -- interface names are case-sensitive, so
+		// using the label there leaves VLAN 1 with no valid ports and locks the
+		// router out on save. Fall back to p[0] for hardware paths that don't
+		// emit a separate device name.
+		var label = p[0], status = p[1], membership = p[2] || '';
+		var device = (p[3] != null && p[3] !== '') ? p[3] : p[0];
 		var native = 'lan';
 		var tagged = [];
 		membership.split(/\s+/).forEach(function(tok) {
@@ -217,7 +224,7 @@ function parsePortAssignmentsFromUci()
 			if(kind == 'u') { native = (vid == '1') ? 'lan' : vid; }
 			else if(kind == 't' && vid != '1') { tagged.push(vid); }
 		});
-		return {name: name, status: status, native: native, tagged: tagged};
+		return {name: device, label: label, status: status, native: native, tagged: tagged};
 	});
 }
 
@@ -338,7 +345,7 @@ function renderPortsTable()
 			p.tagged = Array.prototype.filter.call(this.options, function(o){ return o.selected; }).map(function(o){ return o.value; });
 		};
 
-		return [p.name, p.status, nativeSelect, taggedSelect];
+		return [p.label || p.name, p.status, nativeSelect, taggedSelect];
 	});
 
 	var table = createTable([vlanStr.PortCol, vlanStr.StatusCol, vlanStr.NativeCol, vlanStr.TaggedCol], rows, "vlan_ports_table", false, false);
@@ -445,6 +452,67 @@ function onPinholeRowRemoved(table, row)
 
 // ---- add / validate ----
 
+// A VLAN name is an optional display label (stored as gargoyle_desc). Keep it
+// optional, but reject characters that could break config generation or the UI
+// -- allow a friendly set (letters, digits, space, dot, hyphen, underscore),
+// 1-32 chars. Returns 0 = valid (matches the proofreadText convention).
+function validateVlanName(name)
+{
+	if(name == null || name == "") { return 0; }
+	return /^[A-Za-z0-9 ._\-]{1,32}$/.test(name) ? 0 : 1;
+}
+
+// Live validator for the Subnet field: turn the text red when it holds a
+// non-empty value that isn't a subnet addVlan() would accept. Empty is left
+// neutral (the Add button reports the missing subnet). Mirrors proofreadText's
+// red/no-red behaviour but reuses parseVlanSubnetCidr for the real rule.
+function proofreadVlanSubnet(input)
+{
+	if(input.disabled == true) { return; }
+	var v = input.value;
+	var ok = (v == "") || parseVlanSubnetCidr(v).ok;
+	input.style.color = ok ? "" : "red";
+}
+
+// Auto-suggest a subnet from the VLAN ID so a VLAN can be created by number
+// alone (the subnet is required, but making the user derive one by hand is
+// friction). Fills the Subnet field with 192.168.<id>.0/24 only while the
+// field is empty or still holds a previous suggestion -- it never overwrites a
+// subnet the user typed themselves, and the suggested value stays editable.
+// The overlap/format checks in addVlan() still validate whatever ends up there.
+function suggestVlanSubnet(idField)
+{
+	var subnetField = document.getElementById('add_vlan_subnet');
+	if(subnetField == null) { return; }
+	var prevSuggestion = subnetField.getAttribute('data-suggested');
+	// Only manage the field if it's empty or unchanged from our last suggestion.
+	if(subnetField.value != "" && subnetField.value != prevSuggestion) { return; }
+	var id = idField.value;
+	if(/^[0-9]+$/.test(id))
+	{
+		var n = parseInt(id, 10);
+		// 192.168.<id>.0/24 only makes sense while <id> fits a single octet;
+		// for larger VLAN IDs leave the subnet for the user to enter.
+		if(n >= 2 && n <= 254)
+		{
+			var suggestion = "192.168." + n + ".0/24";
+			subnetField.value = suggestion;
+			subnetField.setAttribute('data-suggested', suggestion);
+			// setting .value programmatically doesn't fire oninput, so run the
+			// subnet proofread here to clear any stale red styling.
+			proofreadVlanSubnet(subnetField);
+			return;
+		}
+	}
+	// ID no longer yields a suggestion (empty or > 254): clear the field only
+	// if it still held our suggestion, so the user is left with a blank to fill.
+	if(subnetField.value == prevSuggestion)
+	{
+		subnetField.value = "";
+		subnetField.removeAttribute('data-suggested');
+	}
+}
+
 function addVlan()
 {
 	var idField = document.getElementById('add_vlan_id');
@@ -504,6 +572,7 @@ function addVlan()
 	idField.value = "";
 	nameField.value = "";
 	subnetField.value = "";
+	subnetField.removeAttribute('data-suggested');
 	dhcpField.checked = true;
 
 	renderVlanDefsTable();
@@ -817,9 +886,14 @@ function saveChanges()
 
 	var onApplied = function(req)
 	{
-		uciOriginal = uci.clone();
-		resetData();
+		// Drop the full-page "please wait" overlay FIRST. safeApplyRun has just
+		// opened the confirm modal on top of the page; if we re-render before
+		// clearing the overlay and resetData() throws, the overlay stays up and
+		// the modal's Keep-Settings button is unclickable behind it. Clearing it
+		// first guarantees the confirm dialog is usable regardless.
 		setControlsEnabled(true);
+		uciOriginal = uci.clone();
+		try { resetData(); } catch(e) { /* page stays usable; the save is what matters */ }
 	}
 	safeApplyRun(commands, {timeout: 60, onApplied: onApplied});
 }
