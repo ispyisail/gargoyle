@@ -3,8 +3,22 @@ src/gz %d_%V_packages %U/packages/%A/packages
 src/gz %d_%V_routing %U/packages/%A/routing
 src/gz %d_%V_telephony %U/packages/%A/telephony
 
-src/gz gargoyle http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F
-src/gz gargoyle_kernel_specific http://www.gargoyle-router.com/packages/gargoyle-%G/%T/%F_kernelspecific
+# Gargoyle plugin feed, hosted on GitHub Releases (RFC #99). Keyed by libc
+# ARCH (%A), not target/profile: gargoyle plugins are per-arch and several
+# targets share one arch, so an arch-keyed feed avoids publishing identical
+# packages once per profile. The release tag "plugins-<major>-<arch>" is the
+# feed's download base; opkg fetches <base>/Packages.gz and every package's
+# Filename from that same base (opkg has no absolute-URL Filename support --
+# verified in libopkg/opkg_download.c -- so index and .ipks MUST share one
+# release, which GitHub Releases gives us for free). The feed's Packages is
+# usign-signed with the Gargoyle OTA key; its public half is baked into
+# /etc/opkg/keys below so signature verification stays on.
+#
+# No separate "_kernelspecific" feed line: this fork builds no gargoyle
+# kernel-tied packages outside the arch feed (bwmon-gargoyle etc. are arch
+# packages living in the same feed), so a second feed would only ever be
+# empty and make opkg warn on every update.
+src/gz gargoyle https://github.com/ispyisail/gargoyle-firmware/releases/download/plugins-%G-%A
 
 # apk backend connection info (GPKG_BACKEND=apk only, see conf.c/gpkg.c --
 # gapk Phase 3/7). Inert for the default legacy backend above. Uses the

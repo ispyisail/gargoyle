@@ -78,6 +78,14 @@ define Package/gpkg/install
 	$(SED) 's,%G,$(GARGOYLE_PACKAGE_VERSION),g' $(1)/etc/opkg.gpkg.tmp
 	$(SED) 's,%F,$(GARGOYLE_PROFILE),g' $(1)/etc/opkg.gpkg.tmp
 
+	# Trust the Gargoyle OTA usign key for the GitHub-hosted plugin feed
+	# (opkg.gpkg.tmp above). Filename is the key's own fingerprint, which is
+	# where opkg looks it up. Public key only -- the private half never
+	# leaves the signing host. This sits alongside OpenWrt's own feed key and
+	# the per-build key, so signature verification stays on for every feed.
+	$(INSTALL_DIR) $(1)/etc/opkg/keys
+	$(INSTALL_DATA) ./files/opkg-keys/106823761d1f5bd4 $(1)/etc/opkg/keys/106823761d1f5bd4
+
 
 endef
 
