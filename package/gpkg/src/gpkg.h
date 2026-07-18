@@ -108,6 +108,15 @@ typedef struct opkg_conf_struct
 {
 	char* lists_dir;
 
+	/* Signature verification for the legacy (opkg-format) backend.
+	 * When check_signature is nonzero, a successfully-downloaded package
+	 * list is only trusted if a Packages.sig fetched from the same feed
+	 * base verifies (usign -V) against a public key in
+	 * signature_keys_dir; otherwise the list is rejected -- fail-closed.
+	 * The apk backend does its own verification and ignores these. */
+	int check_signature;
+	char* signature_keys_dir;   /* usign -P dir; default /etc/opkg/keys */
+
 	string_map* gzip_sources;
 	string_map* plain_sources;
 

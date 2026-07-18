@@ -20,6 +20,11 @@ opkg_conf* load_conf(const char* conf_file_name)
 
 	conf->lists_dir = strdup("/usr/lib/opkg/lists");
 
+	/* Off by default so an existing conf without the option behaves
+	 * exactly as before; the shipped opkg.gpkg.tmp turns it on. */
+	conf->check_signature    = 0;
+	conf->signature_keys_dir = strdup("/etc/opkg/keys");
+
 	/* apk backend connection info (GPKG_BACKEND=apk only) -- see
 	 * docs/gapk-implementation-plan.md Phase 3 in gargoyle-tools.
 	 * Defaults are inert for the legacy opkg backend. */
@@ -110,6 +115,16 @@ opkg_conf* load_conf(const char* conf_file_name)
 				{
 					set_string_map_element(conf->plain_sources, split_line[num_pieces-2], strdup(split_line[num_pieces-1]));
 				}
+				else if( strcmp(split_line[0], "option") == 0 && num_pieces >= 2 && strcmp(split_line[1], "check_signature") == 0)
+				{
+					/* "option check_signature" or "... 1" enables; "... 0" disables. */
+					conf->check_signature = (num_pieces < 3 || strcmp(split_line[num_pieces-1], "0") != 0) ? 1 : 0;
+				}
+				else if( strcmp(split_line[0], "option") == 0 && num_pieces > 2 && strcmp(split_line[1], "signature_keys_dir") == 0)
+				{
+					free(conf->signature_keys_dir);
+					conf->signature_keys_dir = strdup(split_line[num_pieces-1]);
+				}
 				else if( strcmp(split_line[0], "option") == 0 && strstr(split_line[1], "overlay_") != NULL && num_pieces > 2)
 				{
 					char* overlay_name = strstr(split_line[1], "overlay_") + strlen("overlay_");
@@ -139,6 +154,7 @@ void free_conf(opkg_conf* conf)
 {
 	unsigned long num_freed;
 	free(conf->lists_dir);
+	free(conf->signature_keys_dir);
 	free(conf->apk_root);
 	free_if_not_null(conf->apk_repository);
 	free_if_not_null(conf->apk_keys_dir);
