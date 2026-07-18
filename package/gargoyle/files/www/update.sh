@@ -11,9 +11,12 @@
 
 	# Append shared login hook resources as whitespace separated strings to default resources.
 	css=""
-	js="update.js"
+	js="update.js ota.js"
 	i18n="$js"
-	pkg="network system"
+	# "gargoyle" is needed here (wasn't before) so uciOriginal carries the
+	# gargoyle.ota section (RFC #62) -- js/ota.js reads channel/autocheck
+	# from it via uciOriginal.get("gargoyle","ota",...).
+	pkg="network system gargoyle"
 	# Iterate over section array where [$i].option is simply appended to the $hook string.
 	i=0
 	hook="uci -q get gargoyle.@update_hook"
@@ -69,6 +72,92 @@
 </script>
 
 <h1 class="page-header"><%~ update.UpFrm %></h1>
+
+<div class="row" id="ota_section">
+	<div class="col-lg-12">
+		<div class="panel panel-default">
+			<div class="panel-heading">
+				<h3 class="panel-title"><%~ ota.Ttl %></h3>
+			</div>
+			<div class="panel-body">
+				<div class="row form-group">
+					<label class="col-xs-3" for="ota_channel"><%~ ota.Chan %>:</label>
+					<span class="col-xs-9">
+						<select class="form-control" id="ota_channel" onchange="otaSaveChannel()" style="width:auto; display:inline-block;">
+							<option value="stable"><%~ ota.ChanStable %></option>
+							<option value="testing"><%~ ota.ChanTesting %></option>
+						</select>
+					</span>
+				</div>
+				<div class="row form-group" id="ota_testing_warning" style="display:none">
+					<div class="col-xs-12">
+						<div class="alert alert-warning" role="alert"><%~ ota.TestWarn %></div>
+					</div>
+				</div>
+				<div class="row form-group">
+					<div class="col-xs-12">
+						<label>
+							<input type="checkbox" id="ota_autocheck" onchange="otaSaveAutocheck()"/>
+							<%~ ota.Autochk %>
+						</label>
+					</div>
+				</div>
+
+				<div id="ota_result">
+					<div id="ota_panel_idle" style="display:none">
+						<button class="btn btn-primary" onclick="otaCheck()"><%~ ota.CheckBtn %></button>
+					</div>
+					<div id="ota_panel_checking" style="display:none">
+						<em><%~ ota.Checking %></em>
+					</div>
+					<div id="ota_panel_available" style="display:none">
+						<div class="alert alert-success" role="alert">
+							<p>
+								<%~ ota.Available %> <strong id="ota_available_version"></strong>
+								&nbsp;<a id="ota_available_changelog" href="#" target="_blank" style="display:none"><%~ ota.Changelog %></a>
+							</p>
+							<button class="btn btn-primary" onclick="otaStartDownload()"><%~ ota.DownloadBtn %></button>
+						</div>
+					</div>
+					<div id="ota_panel_uptodate" style="display:none">
+						<div class="alert alert-info" role="alert"><%~ ota.UpToDate %> <strong id="ota_uptodate_version"></strong></div>
+						<button class="btn btn-default" onclick="otaCheck()"><%~ ota.CheckBtn %></button>
+					</div>
+					<div id="ota_panel_notlisted" style="display:none">
+						<div class="alert alert-info" role="alert"><%~ ota.NotListed %></div>
+					</div>
+					<div id="ota_panel_eol" style="display:none">
+						<div class="alert alert-warning" role="alert">
+							<p><%~ ota.Eol %> <strong id="ota_eol_final_version"></strong></p>
+							<p id="ota_eol_note"></p>
+						</div>
+					</div>
+					<div id="ota_panel_custom" style="display:none">
+						<div class="alert alert-info" role="alert">
+							<p><%~ ota.Custom %></p>
+							<p id="ota_custom_note"></p>
+						</div>
+					</div>
+					<div id="ota_panel_error" style="display:none">
+						<div class="alert alert-danger" role="alert">
+							<p><%~ ota.CheckErr %></p>
+							<p id="ota_error_detail"></p>
+						</div>
+						<button class="btn btn-default" onclick="otaCheck()"><%~ ota.CheckBtn %></button>
+					</div>
+					<div id="ota_panel_progress" style="display:none">
+						<div class="alert alert-info" role="alert">
+							<p id="ota_progress_state"></p>
+						</div>
+						<button id="ota_install_button" class="btn btn-danger" disabled="disabled" onclick="otaInstall('')"><%~ ota.InstallBtn %></button>
+						<button id="ota_install_clean_button" class="btn btn-warning" disabled="disabled" onclick="otaInstall('clean')"><%~ ota.InstallCleanBtn %></button>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
 <div id="upgrade_section" class="row">
 	<div class="col-lg-6">
 		<div class="panel panel-default">
@@ -154,6 +243,7 @@
 <script>
 <!--
 	resetData();
+	otaResetData();
 //-->
 </script>
 
