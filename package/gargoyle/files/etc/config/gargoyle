@@ -10,6 +10,17 @@ config global global
 	option is_first_boot		'1'
 	option session_timeout		'15'
 
+# RFC #62 signed OTA firmware upgrade (usr/lib/gargoyle/ota_upgrade.sh).
+# channel: 'stable' or 'testing' -- which signed manifest to check against.
+# manifest_base: override for a self-built image's own private OTA channel
+#   (RFC #62 "Custom images"); defaults to the official manifest host when
+#   unset, which is why it has no default value here.
+# autocheck: opt-in only (phase C5) -- '0' disables the daily check cron
+#   entirely; never downloads or flashes on its own either way.
+config ota 'ota'
+	option channel			'stable'
+	option autocheck		'0'
+
 config display display
 	option firewall			'Firewall'
 	option firewall_portforwarding	'Port Forwarding'
