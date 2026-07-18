@@ -770,7 +770,14 @@ static void get_http_response(void* connection_data, int (*read_connection)(void
 	int body_bytes_read = 0;
 	int reading_header=1;
 	char* read_buffer = (char*)malloc((read_buffer_size+1)*sizeof(char));
-	char last_two_bytes_of_old_read_buffer[3] = { '\0', '\0', '\0' }; 
+	char last_two_bytes_of_old_read_buffer[3] = { '\0', '\0', '\0' };
+	/* Accumulates the response header bytes across reads for redirect
+	 * detection. The header can be larger than one read_buffer (default
+	 * 1024 B) -- e.g. GitHub's 302 to its release-asset CDN puts a ~900 B
+	 * signed URL in the Location header -- so a redirect must be detected
+	 * from the joined header, not a single chunk. See the redirect block. */
+	char* accum_header = NULL;
+	int accum_header_len = 0;
 	
 
 	if(reply != NULL)
@@ -826,40 +833,70 @@ static void get_http_response(void* connection_data, int (*read_connection)(void
 			header_length = body_start != NULL ? (int)(body_start - read_buffer) : bytes_read;
 
 
-			/* check for redirects before continuing */
+			/* check for redirects before continuing.
+			 *
+			 * The status line and the Location header can straddle a
+			 * read_buffer boundary (the header block routinely exceeds
+			 * one 1024 B read -- GitHub's release-asset 302 carries a
+			 * ~900 B signed CDN URL in Location), so redirect detection
+			 * must run against the header joined across reads, not a
+			 * single chunk. Detecting from one chunk also crashed: when
+			 * the Location line's terminating CR had not been read yet,
+			 * char_index() returned -1 and malloc((size_t)(-1-10+1)) was
+			 * a multi-GB request that failed ("MALLOC FAILURE!"), so no
+			 * GitHub-hosted feed or image could ever be fetched.
+			 *
+			 * header_length is exactly this chunk's header portion, so
+			 * appending it accumulates only header bytes. On the package
+			 * download path header_stream/combined_stream are NULL, so
+			 * this accumulation writes nothing to the output; body bytes
+			 * are still handled below once the header ends. */
 			if(follow_redirects)
 			{
-				char* tmpheader = malloc((header_length+1)*sizeof(char));
-				if(tmpheader != NULL)
+				char* grown = malloc((accum_header_len + header_length + 1)*sizeof(char));
+				if(grown != NULL)
 				{
-					memcpy(tmpheader, read_buffer, header_length);
-					tmpheader[header_length] = '\0';
-	
-					char* statusline_start = strstr(tmpheader, "HTTP/1.");
+					if(accum_header_len > 0)
+					{
+						memcpy(grown, accum_header, accum_header_len);
+					}
+					memcpy(grown + accum_header_len, read_buffer, header_length);
+					accum_header_len = accum_header_len + header_length;
+					grown[accum_header_len] = '\0';
+					if(accum_header != NULL) { free(accum_header); }
+					accum_header = grown;
+
+					char* statusline_start = strstr(accum_header, "HTTP/1.");
 					if(statusline_start != NULL)
 					{
 						//Format should be: HTTP/1.x xxx Reason Phrase. We need to retrieve xxx which should always be at a standard offset...
 						int status_code = 0;
 						sscanf(statusline_start+9, "%3d", &status_code);
-						if(status_code == 301 || status_code == 302 || status_code == 307)
+						if(status_code == 301 || status_code == 302 || status_code == 307 || status_code == 308)
 						{
 							//There is also the Content-Location: field, which should always be after this, but we won't factor that in here.
-							char* location_start = strstr(tmpheader, "Location:");
+							char* location_start = strstr(accum_header, "Location:");
 							if(location_start != NULL)
 							{
 								int location_end = char_index(location_start, '\r');
-								location_end = location_end - 10;
-								char* location = malloc((location_end+1)*sizeof(char));
-								memcpy(location, location_start+10, location_end);
-								location[location_end] = '\0';
-								*redirect_url = location;
-								free(tmpheader);
-								free(read_buffer);
-								return;
+								/* Only act once the CR that ends the Location line
+								 * has been read. -1 (line not complete yet) must
+								 * never reach malloc as a negative length -- keep
+								 * reading and re-check on the next chunk. */
+								if(location_end >= 10)
+								{
+									int url_len = location_end - 10;
+									char* location = malloc((url_len+1)*sizeof(char));
+									memcpy(location, location_start+10, url_len);
+									location[url_len] = '\0';
+									*redirect_url = location;
+									free(accum_header);
+									free(read_buffer);
+									return;
+								}
 							}
 						}
 					}
-					free(tmpheader);
 				}
 			}
 
@@ -946,6 +983,7 @@ static void get_http_response(void* connection_data, int (*read_connection)(void
 		read_buffer[bytes_read] = '\0'; /* facilitates header string processing */
 	}
 	free(read_buffer);
+	if(accum_header != NULL) { free(accum_header); }
 
 }
 
