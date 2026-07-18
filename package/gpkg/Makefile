@@ -36,7 +36,7 @@ GARGOYLE_PACKAGE_VERSION:=$(shell usemajor=$$(echo $(EXACT_GARGOYLE_VERSION) | g
 define Package/gpkg
 	SECTION:=utils
 	CATEGORY:=Utilities
-	DEPENDS:=+libericstools +libbbtargz +ewget
+	DEPENDS:=+libericstools +libbbtargz +ewget +usign
 	TITLE:= Gargoyle Package Manager (opkg compatible)
 	URL:=http://www.gargoyle-router.com
 	MAINTAINER:=Eric Bishop <eric@gargoyle-router.com>

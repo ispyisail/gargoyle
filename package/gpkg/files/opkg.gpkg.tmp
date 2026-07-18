@@ -44,3 +44,11 @@ dest ram /tmp
 dest plugin_root /plugin_root
 lists_dir ext /var/opkg-lists
 option overlay_root /overlay
+
+# Verify every package list's usign signature (Packages.sig) against a
+# trusted key in /etc/opkg/keys before trusting it -- fail-closed, so an
+# unsigned or wrongly-signed feed is rejected rather than installed. The
+# Gargoyle plugin feed is signed with the OTA key (baked in above); the
+# OpenWrt base feeds carry OpenWrt's own key (also baked in). A feed that
+# fails to download at all is skipped exactly as before, unaffected by this.
+option check_signature 1
