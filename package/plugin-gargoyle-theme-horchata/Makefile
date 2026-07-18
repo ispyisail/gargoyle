@@ -18,10 +18,10 @@ define Package/plugin-gargoyle-theme-horchata
 	PKGARCH:=all
 endef
 
+# HORizontal CHArcoal theme; for modern browsers. Kept as a comment so the
+# rendered Description stays a single-line Plugins-page title.
 define Package/plugin-gargoyle-theme-horchata/description
-	Horchata Theme for Gargoyle
-	HORizontal CHArcoal Theme
-	For modern browsers
+	Horchata theme for Gargoyle
 endef
 
 define Build/Prepare

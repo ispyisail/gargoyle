@@ -21,11 +21,11 @@ define Package/plugin-gargoyle-theme-dark-one
 	PKGARCH:=all
 endef
 
+# "Dark One" theme, based on the theme by matei, created by Tomasz Fornal
+# (http://openrouter.info/forum/viewtopic.php?f=22&t=1061). Kept as a comment
+# so the rendered Description stays a single-line Plugins-page title.
 define Package/plugin-gargoyle-theme-dark-one/description
-	"Dark One" Theme for Gargoyle
-	Based on Theme by matei
-	Created by Tomasz Fornal
-	http://openrouter.info/forum/viewtopic.php?f=22&t=1061
+	Dark One theme for Gargoyle
 endef
 
 define Build/Prepare
