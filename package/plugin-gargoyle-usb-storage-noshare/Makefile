@@ -39,9 +39,7 @@ define Package/plugin-gargoyle-usb-storage-extroot
 endef
 
 define Package/plugin-gargoyle-usb-storage-extroot/description
-	USB Networking and Storage Support for Gargoyle
-	(ext4 and msdos filesystems only, swap and extroot support,
-	 no CIFS/FTP/SMB sharing)
+	USB storage & networking for Gargoyle (ext4/msdos, extroot; no sharing)
 endef
 
 define Package/plugin-gargoyle-usb-storage-noshare
@@ -59,9 +57,7 @@ define Package/plugin-gargoyle-usb-storage-noshare
 endef
 
 define Package/plugin-gargoyle-usb-storage-noshare/description
-	USB Networking and Storage Support for Gargoyle
-	(all supported filesystems, swap and extroot support,
-	 no CIFS/FTP/SMB sharing)
+	USB storage & networking for Gargoyle (all filesystems, extroot; no sharing)
 endef
 
 define Build/Prepare

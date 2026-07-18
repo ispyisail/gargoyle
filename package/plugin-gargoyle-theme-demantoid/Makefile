@@ -17,10 +17,10 @@ define Package/plugin-gargoyle-theme-demantoid
 	PKGARCH:=all
 endef
 
+# Nav menu sits behind the "Gargoyle" wordmark; for modern browsers. Kept as
+# a comment so the rendered Description stays a single-line Plugins-page title.
 define Package/plugin-gargoyle-theme-demantoid/description
 	Demantoid theme for Gargoyle
-	Nav menu behind "Gargoyle"
-	For use with modern browsers
 endef
 
 define Build/Prepare
