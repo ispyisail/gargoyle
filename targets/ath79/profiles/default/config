@@ -436,6 +436,7 @@ CONFIG_PACKAGE_nfs-utils-libs=m
 CONFIG_PACKAGE_openvpn-gargoyle-easy-rsa=m
 CONFIG_PACKAGE_openvpn-gargoyle-mbedtls=m
 CONFIG_PACKAGE_p910nd=m
+CONFIG_PACKAGE_plugin-gargoyle-captive-portal=m
 CONFIG_PACKAGE_plugin-gargoyle-ddns=m
 CONFIG_PACKAGE_plugin-gargoyle-ipheth-tether=m
 CONFIG_PACKAGE_plugin-gargoyle-minidlna=m
