@@ -21,10 +21,7 @@ define Package/plugin-gargoyle-captive-portal
 endef
 
 define Package/plugin-gargoyle-captive-portal/description
-	Guest-network captive portal (click-through or password auth). Gates WAN
-	access for devices connected to a Gargoyle guest wifi network without
-	introducing a separate guest subnet/zone - built entirely on top of the
-	existing bridge-based guest wifi isolation.
+	Guest WiFi captive portal for Gargoyle
 endef
 
 define Build/Prepare
