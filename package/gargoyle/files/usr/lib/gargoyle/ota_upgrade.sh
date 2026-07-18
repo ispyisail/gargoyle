@@ -28,7 +28,8 @@
 #   OTA_CHANNEL        substitutes for `uci get gargoyle.ota.channel`
 #   OTA_MANIFEST_BASE  substitutes for `uci get gargoyle.ota.manifest_base`
 #   OTA_KEYS_DIR       substitutes for the usign keys directory
-#   OTA_STATE_DIR      substitutes for /etc/gargoyle (persisted state)
+#   OTA_STATE_DIR      substitutes UCI-backed state (gargoyle.ota.*) with a
+#                      plain file under this dir -- see ota_state_get/_set
 #   OTA_STATUS_FILE    substitutes for /tmp/ota_status
 #   OTA_WORK_DIR       substitutes for /tmp/ota (download staging)
 set -e
@@ -37,7 +38,6 @@ OFFICIAL_KEY_FPR="106823761d1f5bd4"
 DEFAULT_MANIFEST_BASE="https://ispyisail.github.io/gargoyle-firmware/ota"
 
 KEYS_DIR="${OTA_KEYS_DIR:-/etc/opkg/keys}"
-STATE_DIR="${OTA_STATE_DIR:-/etc/gargoyle}"
 STATUS_FILE="${OTA_STATUS_FILE:-/tmp/ota_status}"
 WORK_DIR="${OTA_WORK_DIR:-/tmp/ota}"
 
@@ -99,6 +99,44 @@ ota_is_custom_build() {
 	[ ! -f "$KEYS_DIR/$OFFICIAL_KEY_FPR" ]
 }
 
+# Persisted OTA state (the anti-replay `generated` marker, and -- from
+# phase C2 -- the last-applied image's sha256). On a real router this MUST
+# survive a keep-settings sysupgrade, and a plain file under /etc/gargoyle/
+# does NOT: OpenWrt's keep-settings sweep preserves /etc/config/* (via each
+# package's registered conffiles) plus whatever /etc/sysupgrade.conf lists
+# (empty by default) plus lib/upgrade/keep.d/* (essential system files only,
+# e.g. /etc/passwd) -- an arbitrary directory like /etc/gargoyle/ is covered
+# by NONE of those unless a package explicitly registers it. UCI options
+# under /etc/config/gargoyle ARE reliably preserved, so that is the real
+# persistence mechanism; OTA_STATE_DIR remains the host/vnet TEST substitute
+# (plain file, no real UCI needed) -- exactly the role its sibling env
+# overrides already play.
+ota_state_get() {
+	# $1 = key (last_generated | applied_sha256)
+	if [ -n "$OTA_STATE_DIR" ]; then
+		cat "$OTA_STATE_DIR/ota_$1" 2>/dev/null || true
+	else
+		uci -q get "gargoyle.ota.$1" 2>/dev/null || true
+	fi
+}
+
+ota_state_set() {
+	# $1 = key, $2 = value
+	if [ -n "$OTA_STATE_DIR" ]; then
+		mkdir -p "$OTA_STATE_DIR" 2>/dev/null
+		printf '%s' "$2" > "$OTA_STATE_DIR/ota_$1"
+	else
+		# Defensive: a router on firmware that predates this file's default
+		# /etc/config/gargoyle addition has no `ota` section yet, and
+		# `uci set pkg.section.opt=val` fails outright when the section
+		# itself does not exist (confirmed live) -- create it first.
+		uci -q get gargoyle.ota >/dev/null 2>&1 || uci set gargoyle.ota=ota 2>/dev/null
+		uci set "gargoyle.ota.$1=$2" 2>/dev/null
+		uci commit gargoyle 2>/dev/null
+	fi
+	return 0
+}
+
 # download/verify re-emit the board/channel/version/etc. context from their
 # internal `check` call, but must strip ITS `result=` line first -- otherwise
 # stdout would carry two `result=` lines (check's answer, then download's/
@@ -118,7 +156,7 @@ ota_print_context() {
 # its job. Exit 1 only for a hard failure that produced no trustworthy
 # answer at all (network, signature, replay).
 cmd_check() {
-	mkdir -p "$WORK_DIR" "$STATE_DIR"
+	mkdir -p "$WORK_DIR"
 	ota_status "checking"
 
 	local _board _channel _base _manifest_url _manifest _sig
@@ -163,10 +201,9 @@ cmd_check() {
 	# strings -- ISO-8601 UTC ("2026-07-18T05:43:41Z") sorts lexically, no
 	# date parsing needed. Only an accepted (newer-or-equal) manifest moves
 	# the marker forward, so a stale one can never move it backward either.
-	local _generated _last_file _last
+	local _generated _last
 	_generated="$(jsonfilter -i "$_manifest" -e '@.generated' 2>/dev/null)" || true
-	_last_file="$STATE_DIR/ota_last_generated"
-	_last="$(cat "$_last_file" 2>/dev/null)" || true
+	_last="$(ota_state_get last_generated)"
 	if [ -n "$_last" ] && [ -n "$_generated" ] && \
 	   [ "$(printf '%s\n%s\n' "$_generated" "$_last" | sort | tail -1)" != "$_generated" ]; then
 		ota_status "failed" "manifest is older than the last one seen"
@@ -176,7 +213,7 @@ cmd_check() {
 		echo "last_generated=$_last"
 		return 1
 	fi
-	[ -n "$_generated" ] && printf '%s' "$_generated" > "$_last_file"
+	[ -n "$_generated" ] && ota_state_set last_generated "$_generated"
 
 	echo "board=$_board"
 	echo "channel=$_channel"
@@ -248,7 +285,7 @@ cmd_check() {
 	_url="$(printf '%s' "$_entry" | jsonfilter -e '@.url' 2>/dev/null)" || true
 	_sig_url="$(printf '%s' "$_entry" | jsonfilter -e '@.sig_url' 2>/dev/null)" || true
 	_changelog="$(printf '%s' "$_entry" | jsonfilter -e '@.changelog' 2>/dev/null)" || true
-	_applied="$(cat "$STATE_DIR/ota_applied_sha256" 2>/dev/null)" || true
+	_applied="$(ota_state_get applied_sha256)"
 
 	if [ -n "$_sha256" ] && [ "$_sha256" = "$_applied" ]; then
 		ota_status "up-to-date"
