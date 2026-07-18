@@ -423,12 +423,99 @@ cmd_verify() {
 	return 0
 }
 
+# Config-survival seam (RFC #62 / #97 companion). #97 (the settings-profile
+# exporter) does not exist yet -- v1 applies with sysupgrade's own
+# keep-settings default, nothing more. This function is the seam #97 will
+# fill: export a stash tarball here and pass it to `sysupgrade -f <stash>`
+# instead of the plain keep-settings call below. Kept as an explicit no-op
+# rather than skipped entirely so the C2->#97 wiring point is one function,
+# not a grep through cmd_apply.
+ota_export_stash() {
+	printf ''
+}
+
+# ─── apply ────────────────────────────────────────────────────────────────
+# Flashes an already-downloaded, already-verified image. This is the one
+# irreversible subcommand: once `sysupgrade` starts writing, single-
+# partition hardware (e.g. MT6000) has no A/B slot to fall back to, so
+# every check that matters must happen BEFORE this point, never during or
+# after -- there is no "after" in this process (sysupgrade replaces the
+# running system; a caller invoking this must expect the connection/process
+# to end here, not return).
+#
+# Order (fail-closed, matches the RFC's anti-brick section):
+#   1. re-verify (fresh check + sha256 + usign sig -- cmd_verify, not a
+#      cached belief that a prior verify succeeded)
+#   2. stock OpenWrt device-match/compat gate (validate_firmware_image --
+#      the SAME check the manual upload page relies on; see do_upgrade.sh)
+#   3. record the applied sha256 (survives via UCI, see ota_state_set)
+#      BEFORE flashing -- there is no reliable "after" to write it in
+#   4. flash
+#
+# Never passes sysupgrade's `-F` (force): forcing is explicitly the manual
+# page's job, gated behind its own checkbox and an admin who has read the
+# warning it shows. The OTA path only ever flashes an image that passed
+# every fail-closed check; force would defeat the entire point of it.
+cmd_apply() {
+	# $1 = "clean" to wipe settings (sysupgrade -n) instead of the default
+	# keep-settings behaviour (plain `sysupgrade <img>`, no flag).
+	local _mode="$1"
+	local _img="$WORK_DIR/ota.img"
+
+	local _verify_out _verify_result
+	_verify_out="$(cmd_verify)" || true
+	_verify_result="$(printf '%s\n' "$_verify_out" | sed -n 's/^result=//p')"
+	if [ "$_verify_result" != "verified" ]; then
+		ota_status "failed" "apply refused: image did not re-verify"
+		# ota_print_context strips only verify's `result=` line, not its
+		# `error=` -- that error (no-image/hash-mismatch/bad-signature) is
+		# the actual useful diagnostic; apply's own error=not-verified below
+		# is the single authoritative RESULT, not a replacement for it.
+		ota_print_context "$_verify_out"
+		echo "error=not-verified"
+		return 1
+	fi
+
+	ota_status "validating"
+	local _vfi_json _vfi_err="$WORK_DIR/validate.stderr"
+	_vfi_json="$(/usr/libexec/validate_firmware_image "$_img" 2>"$_vfi_err")" || true
+	local _valid _devmatch
+	_valid="$(printf '%s' "$_vfi_json" | jsonfilter -e '@.valid' 2>/dev/null)" || true
+	_devmatch="$(printf '%s' "$_vfi_json" | jsonfilter -e '@.tests.fwtool_device_match' 2>/dev/null)" || true
+	if [ "$_valid" != "true" ]; then
+		ota_status "failed" "apply refused: validate_firmware_image rejected the image (device mismatch or incompatible)"
+		echo "result=error"
+		echo "error=image-rejected"
+		echo "valid=$_valid"
+		echo "device_match=$_devmatch"
+		echo "detail=$(cat "$_vfi_err" 2>/dev/null | tr '\n' ' ')"
+		return 1
+	fi
+
+	# The applied sha256 becomes the new "up-to-date" marker for future
+	# `check` calls. Written now, not after sysupgrade returns, because
+	# sysupgrade never returns on success -- it replaces the running system.
+	local _got_sha
+	_got_sha="$(sha256sum "$_img" 2>/dev/null | cut -d' ' -f1)"
+	ota_state_set applied_sha256 "$_got_sha"
+
+	ota_export_stash
+
+	local _flags=""
+	[ "$_mode" = "clean" ] && _flags="-n"
+
+	ota_status "applying"
+	# shellcheck disable=SC2086
+	exec sysupgrade $_flags "$_img"
+}
+
 case "$1" in
 	check)    cmd_check ;;
 	download) cmd_download ;;
 	verify)   cmd_verify ;;
+	apply)    cmd_apply "$2" ;;
 	*)
-		echo "usage: $0 {check|download|verify}" >&2
+		echo "usage: $0 {check|download|verify|apply [clean]}" >&2
 		exit 2
 		;;
 esac
