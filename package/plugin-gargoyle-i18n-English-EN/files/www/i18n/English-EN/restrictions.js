@@ -68,3 +68,22 @@ restStr.MTyp="Match Type";
 restStr.MTExp="Match Text / Expression";
 restStr.UMZErr="ERROR: URL match length must be greater than zero";
 restStr.UChErr="ERROR: URL match cannot contain quote or newline characters";
+
+//timed re-enable (disable a rule, it re-enables itself after a set time)
+restStr.Re30M="30 min";
+restStr.Re1H="1 hr";
+restStr.Re4H="4 hr";
+restStr.ReTom="Until Tomorrow";
+restStr.ReCustLbl="Custom:";
+restStr.ReMinUnit="minutes";
+restStr.ReHrUnit="hours";
+restStr.ReSetBtn="Set";
+restStr.ReCancel="Cancel";
+restStr.ReChange="Change";
+restStr.RePendRel30="Will re-enable in 30 minutes";
+restStr.RePendRel1H="Will re-enable in 1 hour";
+restStr.RePendRel4H="Will re-enable in 4 hours";
+restStr.RePendRelTom="Will re-enable tomorrow at midnight";
+restStr.RePendRelCust="Will re-enable after Save";
+restStr.RePendAbsPfx="Disabled until";
+restStr.ReDurErr="ERROR: custom duration must be a whole number of minutes or hours, greater than zero";

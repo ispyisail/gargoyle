@@ -721,9 +721,25 @@ isolate_guest_networks()
 }
 
 
+# Registers restriction_reenable.sh's sweep cron line. Unconditional and
+# idempotent (see the script's own install_cron), not a feature toggle --
+# any number of restriction rules can have independent pending timers with
+# no single "is this feature on" bit to hang add/remove logic off, so this
+# just needs to run on every boot/reload. Unlike Device Groups (fw4/
+# nftables-set-specific, deliberately not wired into this fw3 variant's
+# ifup_firewall), restriction_reenable.sh only touches UCI and calls the
+# generic restart_firewall.sh -- backend-agnostic, so it belongs here too.
+manage_restriction_reenable()
+{
+	if [ -x /usr/lib/gargoyle/restriction_reenable.sh ] ; then
+		/usr/lib/gargoyle/restriction_reenable.sh install_cron
+	fi
+}
+
 ifup_firewall()
 {
 	insert_restriction_rules
+	manage_restriction_reenable
 	initialize_quotas
 	insert_pf_loopback_rules
 }

@@ -18,6 +18,11 @@
 		escaped=$(printf '%s' "$grp" | sed 's/\\/\\\\/g; s/"/\\"/g')
 		printf 'knownDeviceGroups.push("%s");\n' "$escaped"
 	done
+	# Same tz-offset export basic.sh already does for its own page -- lets
+	# a timed-disable's "Disabled until HH:MM" render in the ROUTER's local
+	# time, not the admin's browser, consistent with how every other
+	# schedule field on this page is already interpreted.
+	echo "var timezoneOffStr = \""$(date +%z)"\";"
 %>
 	var uci = uciOriginal.clone();
 //-->

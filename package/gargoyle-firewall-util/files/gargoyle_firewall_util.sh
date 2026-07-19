@@ -730,10 +730,24 @@ manage_device_groups()
 	fi
 }
 
+# Registers restriction_reenable.sh's sweep cron line. Unconditional and
+# idempotent (see the script's own install_cron), not a feature toggle --
+# any number of restriction rules can have independent pending timers with
+# no single "is this feature on" bit to hang add/remove logic off, so this
+# just needs to run on every boot/reload the way manage_device_groups()
+# does, self-healing a lost cron line the same way.
+manage_restriction_reenable()
+{
+	if [ -x /usr/lib/gargoyle/restriction_reenable.sh ] ; then
+		/usr/lib/gargoyle/restriction_reenable.sh install_cron
+	fi
+}
+
 ifup_firewall()
 {
 	manage_device_groups
 	insert_restriction_rules
+	manage_restriction_reenable
 	initialize_quotas
 	insert_pf_loopback_rules
 }

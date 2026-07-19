@@ -40,6 +40,56 @@ function saveChanges()
 			var check = ruleData[ruleIndex][1];
 			enabledRuleFound = enabledRuleFound || check.checked;
 			uci.set(pkg, check.id, "enabled", check.checked ? "1" : "0");
+
+			// Timed re-enable: reenable_at is only meaningful for a
+			// currently-disabled row. A fresh pick THIS session always
+			// wins. An explicit Cancel THIS session leaves it absent. With
+			// neither, restore whatever uciOriginal already had rather
+			// than trusting the current uci model -- editing ANY other
+			// field on this row via the edit modal calls
+			// uci.removeSection() first (setUciFromDocument), which wipes
+			// reenable_at out of the model exactly like it wipes enabled;
+			// enabled survives that because this loop always re-derives it
+			// from the checkbox above, never from the model, and
+			// reenable_at needs the identical treatment or an unrelated
+			// field edit would silently cancel a still-pending timer.
+			if(!check.checked)
+			{
+				var reenableContainer = ruleData[ruleIndex][3];
+				var dur = reenableContainer.pendingDurationSeconds;
+				if(dur === "tomorrow")
+				{
+					runCommands.push("uci set " + pkg + "." + check.id + ".reenable_at=$(. /usr/lib/gargoyle/restriction_reenable.sh; next_local_midnight)");
+					// The AUTHORITATIVE value is whatever the router just
+					// computed via the command above (avoids browser/router
+					// clock skew for the value that actually governs when
+					// the sweep fires) -- but stateChangeFunction's
+					// post-save uciOriginal=uci.clone() only ever reflects
+					// the CLIENT-side uci model, which a pure shell command
+					// string never touches. Without this, the immediate
+					// post-save re-render has nothing to show (confirmed
+					// live: wire state was correct, the panel just never
+					// updated). This is a display-only approximation using
+					// the browser's own clock; a later real page load reads
+					// the true server-computed value from fresh UCI.
+					uci.set(pkg, check.id, "reenable_at", "" + computeNextLocalMidnightApprox());
+				}
+				else if(typeof dur == "number" && dur > 0)
+				{
+					runCommands.push("uci set " + pkg + "." + check.id + ".reenable_at=$(( $(date +%s) + " + dur + " ))");
+					uci.set(pkg, check.id, "reenable_at", "" + (Math.floor(Date.now() / 1000) + dur));
+				}
+				else if(dur !== "cancel")
+				{
+					var origReenable = uciOriginal.get(pkg, check.id, "reenable_at");
+					if(origReenable != "")
+					{
+						uci.set(pkg, check.id, "reenable_at", origReenable);
+					}
+				}
+				// dur === "cancel": explicitly cleared this session, leave
+				// reenable_at absent -- nothing to do.
+			}
 		}
 
 		// Only a genuinely new section (one uci knows about that
@@ -63,7 +113,14 @@ function saveChanges()
 	createSectionCommands.push("uci commit");
 
 
-	var commands = deleteSectionCommands.join("\n") + "\n" + createSectionCommands.join("\n") + "\n" + uci.getScriptCommands(uciOriginal) + "\n" + runCommands.join("\n") + "\n" + "sh /usr/lib/gargoyle/restart_firewall.sh";
+	// uci.getScriptCommands() above already ends with its own "uci commit"
+	// (like deleteSectionCommands/createSectionCommands do), but that
+	// commit runs BEFORE runCommands here -- so a reenable_at set pushed
+	// into runCommands needs one more commit of its own before
+	// restart_firewall.sh reads the config, or it'd still be sitting
+	// uncommitted when the regen happens.
+	var runCommandsStr = runCommands.length > 0 ? runCommands.join("\n") + "\nuci commit" : "";
+	var commands = deleteSectionCommands.join("\n") + "\n" + createSectionCommands.join("\n") + "\n" + uci.getScriptCommands(uciOriginal) + "\n" + runCommandsStr + "\n" + "sh /usr/lib/gargoyle/restart_firewall.sh";
 
 	var param = getParameterDefinition("commands", commands) +  "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
 	var stateChangeFunction = function(req)
@@ -111,12 +168,15 @@ function resetData()
 				checkElements.push(enabledCheck);
 				areChecked.push(enabledBool);
 
-				ruleTableData.push([description, enabledCheck, createEditButton(enabledBool,isRestriction)]);
+				var reenableAtStr = uciOriginal.get(pkg, sections[sectionIndex], "reenable_at");
+				var reenableCell = createReenableCell(sections[sectionIndex], enabledBool, reenableAtStr);
+
+				ruleTableData.push([description, enabledCheck, createEditButton(enabledBool,isRestriction), reenableCell]);
 			}
 		}
 
 		var firstColumn = ruleType == "restriction_rule" ? restStr.RDesc : restStr.ESect;
-		columnNames=[firstColumn, UI.Enabled, ""];
+		columnNames=[firstColumn, UI.Enabled, "", ""];
 		ruleTable = createTable(columnNames, ruleTableData, rulePrefix + "table", true, false, removeRuleCallback);
 
 		tableContainer = document.getElementById(rulePrefix + 'table_container');
@@ -171,7 +231,14 @@ function addNewRule(ruleType, rulePrefix)
 		var enabledCheck = createEnabledCheckbox(true);
 		enabledCheck.id = newId; //save section id as checkbox name (yeah, it's kind of sneaky...)
 
-		addTableRow(table, [description, enabledCheck, createEditButton(true,isRestriction)], true, false, removeRuleCallback);
+		// A brand-new rule always starts enabled, so its reenable cell has
+		// nothing to show yet (createReenableCell hides it for
+		// enabledBool==true) -- it exists purely to keep this row's column
+		// count consistent with existing rows, in case the admin disables
+		// it before saving.
+		var reenableCell = createReenableCell(newId, true, null);
+
+		addTableRow(table, [description, enabledCheck, createEditButton(true,isRestriction), reenableCell], true, false, removeRuleCallback);
 
 		setDocumentFromUci(new UCIContainer(), "", ruleType, rulePrefix);
 
@@ -293,6 +360,223 @@ function setRowEnabled()
 	setElementEnabled(row, enabled);
 
 	uci.set(pkg, enabledId, "enabled", enabled);
+
+	var reenableContainer = enabledRow.childNodes[3].firstChild;
+	if(this.checked)
+	{
+		// Invariant: enabled==1 rows never carry a pending timer. Clear it
+		// immediately here (matching how "enabled" itself is set
+		// immediately on click, not deferred to Save) rather than only at
+		// save time, so re-checking the box visibly and immediately hides
+		// the picker/pending display too.
+		uci.set(pkg, enabledId, "reenable_at", "");
+		reenableContainer.pendingDurationSeconds = null;
+		reenableContainer.style.display = "none";
+	}
+	else
+	{
+		reenableContainer.style.display = "";
+		showReenablePresetView(reenableContainer);
+	}
+}
+
+// ─── Timed re-enable (disable a rule for N minutes/hours, or until the next
+// local midnight, then have the router flip it back on by itself) ─────────
+//
+// Each row's 4th cell holds one container with two mutually exclusive
+// sub-views: a preset/custom duration picker (shown while enabled==0 and no
+// duration has been picked/persisted yet) and a pending-status view (shown
+// once one has). container.pendingDurationSeconds tracks what THIS SESSION
+// has picked -- null (no interaction yet, only relevant if a persisted
+// reenable_at already exists), "cancel" (explicitly cleared this session),
+// "tomorrow", or a positive integer of seconds -- and is read by
+// saveChanges() below. This can't live inside the uci model itself: editing
+// ANY other field on this same rule via the edit modal calls
+// uci.removeSection() first (see setUciFromDocument), which would silently
+// wipe a same-session pending pick before Save ever ran.
+
+function createReenableCell(sectionId, enabledBool, reenableAtStr)
+{
+	var container = document.createElement("div");
+	container.id = sectionId + "_reenable";
+	container.pendingDurationSeconds = null;
+	container.reenableSectionId = sectionId;
+
+	var presetView = document.createElement("div");
+	presetView.className = "reenable_preset_view";
+
+	function presetButton(labelText, seconds, extraClass)
+	{
+		var b = createInput("button");
+		b.textContent = labelText;
+		b.className = "btn btn-default btn-xs " + extraClass;
+		b.onclick = function(){ reenableSetPreset(container, seconds); };
+		return b;
+	}
+	presetView.appendChild(presetButton(restStr.Re30M, 1800, "reenable_btn_30m"));
+	presetView.appendChild(presetButton(restStr.Re1H, 3600, "reenable_btn_1h"));
+	presetView.appendChild(presetButton(restStr.Re4H, 14400, "reenable_btn_4h"));
+
+	var tomorrowBtn = createInput("button");
+	tomorrowBtn.textContent = restStr.ReTom;
+	tomorrowBtn.className = "btn btn-default btn-xs reenable_btn_tomorrow";
+	tomorrowBtn.onclick = function(){ reenableSetTomorrow(container); };
+	presetView.appendChild(tomorrowBtn);
+
+	var customWrap = document.createElement("span");
+	customWrap.className = "reenable_custom_wrap";
+	var customLabel = document.createElement("span");
+	customLabel.textContent = " " + restStr.ReCustLbl + " ";
+	customWrap.appendChild(customLabel);
+
+	var customAmount = createInput("text");
+	customAmount.className = "form-control input-sm reenable_custom_amount";
+	customAmount.size = 3;
+	customWrap.appendChild(customAmount);
+
+	var customUnit = document.createElement("select");
+	customUnit.className = "form-control input-sm reenable_custom_unit";
+	var minOpt = document.createElement("option");
+	minOpt.value = "60";
+	minOpt.textContent = restStr.ReMinUnit;
+	var hrOpt = document.createElement("option");
+	hrOpt.value = "3600";
+	hrOpt.textContent = restStr.ReHrUnit;
+	customUnit.appendChild(minOpt);
+	customUnit.appendChild(hrOpt);
+	customWrap.appendChild(customUnit);
+
+	var customSetBtn = createInput("button");
+	customSetBtn.textContent = restStr.ReSetBtn;
+	customSetBtn.className = "btn btn-default btn-xs reenable_btn_custom_set";
+	customSetBtn.onclick = function(){ reenableSetCustom(container, customAmount, customUnit); };
+	customWrap.appendChild(customSetBtn);
+
+	presetView.appendChild(customWrap);
+	container.appendChild(presetView);
+
+	var pendingView = document.createElement("div");
+	pendingView.className = "reenable_pending_view";
+	var pendingLabel = document.createElement("span");
+	pendingLabel.className = "reenable_pending_label";
+	pendingView.appendChild(pendingLabel);
+	pendingView.appendChild(document.createTextNode(" "));
+
+	var changeBtn = createInput("button");
+	changeBtn.textContent = restStr.ReChange;
+	changeBtn.className = "btn btn-default btn-xs reenable_btn_change";
+	changeBtn.onclick = function(){ reenableChange(container); };
+	pendingView.appendChild(changeBtn);
+	pendingView.appendChild(document.createTextNode(" "));
+
+	var cancelBtn = createInput("button");
+	cancelBtn.textContent = restStr.ReCancel;
+	cancelBtn.className = "btn btn-default btn-xs reenable_btn_cancel";
+	cancelBtn.onclick = function(){ reenableCancel(container); };
+	pendingView.appendChild(cancelBtn);
+
+	container.appendChild(pendingView);
+	container.pendingLabelElement = pendingLabel;
+
+	if(!enabledBool && reenableAtStr != null && reenableAtStr != "")
+	{
+		showReenablePendingView(container, restStr.RePendAbsPfx + " " + formatRouterLocalTime(reenableAtStr));
+	}
+	else
+	{
+		showReenablePresetView(container);
+	}
+	container.style.display = enabledBool ? "none" : "";
+
+	return container;
+}
+
+function showReenablePresetView(container)
+{
+	container.getElementsByClassName("reenable_preset_view")[0].style.display = "";
+	container.getElementsByClassName("reenable_pending_view")[0].style.display = "none";
+}
+
+function showReenablePendingView(container, labelText)
+{
+	container.pendingLabelElement.textContent = labelText;
+	container.getElementsByClassName("reenable_preset_view")[0].style.display = "none";
+	container.getElementsByClassName("reenable_pending_view")[0].style.display = "";
+}
+
+function reenableSetPreset(container, seconds)
+{
+	container.pendingDurationSeconds = seconds;
+	var labels = {1800: restStr.RePendRel30, 3600: restStr.RePendRel1H, 14400: restStr.RePendRel4H};
+	showReenablePendingView(container, labels[seconds]);
+}
+
+function reenableSetTomorrow(container)
+{
+	container.pendingDurationSeconds = "tomorrow";
+	showReenablePendingView(container, restStr.RePendRelTom);
+}
+
+function reenableSetCustom(container, amountInput, unitSelect)
+{
+	var amount = parseInt(amountInput.value, 10);
+	if(isNaN(amount) || amount <= 0 || String(amount) != amountInput.value.replace(/^\s+|\s+$/g, ""))
+	{
+		alert(restStr.ReDurErr);
+		return;
+	}
+	var unitSeconds = parseInt(unitSelect.value, 10);
+	container.pendingDurationSeconds = amount * unitSeconds;
+	showReenablePendingView(container, restStr.RePendRelCust);
+}
+
+function reenableCancel(container)
+{
+	container.pendingDurationSeconds = "cancel";
+	uci.set(pkg, container.reenableSectionId, "reenable_at", "");
+	showReenablePresetView(container);
+}
+
+function reenableChange(container)
+{
+	showReenablePresetView(container);
+}
+
+// Router-local HH:MM AM/PM from a unix-epoch-seconds string, using
+// timezoneOffStr (injected by restriction.sh the same way basic.sh already
+// does for its own page) -- reuses that exact conversion formula so this
+// renders in the ROUTER's timezone, not the admin's browser, consistent
+// with how every other schedule field on this page is already interpreted.
+function formatRouterLocalTime(epochSecondsStr)
+{
+	var epochSeconds = parseInt(epochSecondsStr, 10);
+	if(isNaN(epochSeconds)) { return ""; }
+	var offsetSeconds = (parseInt(timezoneOffStr.substr(0,3),10)*60 + parseInt(timezoneOffStr.substr(3,2),10))*60;
+	var localMs = (epochSeconds + offsetSeconds) * 1000;
+	var d = new Date(localMs);
+	var hours = d.getUTCHours();
+	var minutes = d.getUTCMinutes();
+	var ampm = hours >= 12 ? "PM" : "AM";
+	var hours12 = hours % 12;
+	hours12 = hours12 == 0 ? 12 : hours12;
+	var minutesStr = minutes < 10 ? "0" + minutes : "" + minutes;
+	return hours12 + ":" + minutesStr + " " + ampm;
+}
+
+// Display-only approximation of restriction_reenable.sh's next_local_midnight,
+// using the BROWSER's clock but the ROUTER's timezone offset (timezoneOffStr)
+// -- see the "tomorrow" branch in saveChanges() for why this exists at all:
+// the AUTHORITATIVE value is always whatever the router computes server-side
+// when the actual reenable_at=$(...) shell command runs, this is only ever
+// used to give the immediate post-save UI something reasonable to show
+// before the next real page load reads the true persisted value.
+function computeNextLocalMidnightApprox()
+{
+	var now = Math.floor(Date.now() / 1000);
+	var offsetSeconds = (parseInt(timezoneOffStr.substr(0,3),10)*60 + parseInt(timezoneOffStr.substr(3,2),10))*60;
+	var localNow = now + offsetSeconds;
+	var localMidnightToday = localNow - (localNow % 86400);
+	return localMidnightToday + 86400 - offsetSeconds;
 }
 function removeRuleCallback(table, row)
 {
