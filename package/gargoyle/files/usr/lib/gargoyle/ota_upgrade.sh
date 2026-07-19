@@ -197,26 +197,44 @@ cmd_check() {
 		return 1
 	fi
 
-	# Anti-replay: refuse a validly-signed but STALE manifest. Compared as
-	# strings -- ISO-8601 UTC ("2026-07-18T05:43:41Z") sorts lexically, no
-	# date parsing needed. Only an accepted (newer-or-equal) manifest moves
-	# the marker forward, so a stale one can never move it backward either.
-	local _generated _last
+	# Anti-replay: flag (but don't hard-block) a validly-signed manifest
+	# whose `generated` timestamp regressed versus the last one this router
+	# saw. Compared as strings -- ISO-8601 UTC ("2026-07-18T05:43:41Z")
+	# sorts lexically, no date parsing needed.
+	#
+	# A regression here is NOT proof of an attack: the manifest already
+	# passed signature verification above, so it is genuinely from the
+	# trusted publisher, not a forged/attacker-controlled file. A publisher
+	# can legitimately revert a channel to an earlier snapshot (seen live:
+	# the "stable" channel's generated timestamp went backward on
+	# 2026-07-18 after a prior, newer publish). Hard-failing `check` itself
+	# on this left a router permanently unable to see ANY future update --
+	# including a genuinely newer one -- until a manifest newer than the
+	# poisoned marker eventually appeared, since the marker was already
+	# ratcheted forward by the earlier (since-reverted) check.
+	#
+	# So: check surfaces this as a warning and keeps going (still useful
+	# information even from a regressed manifest), and does NOT move
+	# last_generated backward (so a genuine rollback attack still can't
+	# make the marker itself regress). The actual hard block moves to
+	# cmd_download/cmd_verify below -- an attacker replaying an old,
+	# validly-signed-in-the-past manifest to trigger a downgrade is a real
+	# risk specifically at download/apply time, not at check time.
+	local _generated _last _manifest_regressed
 	_generated="$(jsonfilter -i "$_manifest" -e '@.generated' 2>/dev/null)" || true
 	_last="$(ota_state_get last_generated)"
+	_manifest_regressed=0
 	if [ -n "$_last" ] && [ -n "$_generated" ] && \
 	   [ "$(printf '%s\n%s\n' "$_generated" "$_last" | sort | tail -1)" != "$_generated" ]; then
-		ota_status "failed" "manifest is older than the last one seen"
-		echo "result=error"
-		echo "error=stale-manifest"
-		echo "generated=$_generated"
-		echo "last_generated=$_last"
-		return 1
+		ota_status "warning" "manifest is older than the last one seen -- treating as informational only, download/apply will refuse to act on it"
+		_manifest_regressed=1
+	else
+		[ -n "$_generated" ] && ota_state_set last_generated "$_generated"
 	fi
-	[ -n "$_generated" ] && ota_state_set last_generated "$_generated"
 
 	echo "board=$_board"
 	echo "channel=$_channel"
+	echo "manifest_regressed=$_manifest_regressed"
 	echo "generated=$_generated"
 
 	if ota_is_custom_build; then
@@ -311,12 +329,23 @@ cmd_check() {
 # arbitrary file by a compromised caller.
 cmd_download() {
 	mkdir -p "$WORK_DIR"
-	local _check_out _result _url _sig_url _sha256 _size
+	local _check_out _result _regressed _url _sig_url _sha256 _size
 	_check_out="$(cmd_check)" || { ota_print_context "$_check_out"; return 1; }
 	_result="$(printf '%s\n' "$_check_out" | sed -n 's/^result=//p')"
 	if [ "$_result" != "update-available" ]; then
 		ota_print_context "$_check_out"
 		echo "error=no-update-available"
+		return 1
+	fi
+	# check surfaces a manifest-regression as a warning rather than
+	# hard-failing (see the anti-replay comment in cmd_check), but
+	# download/apply is where a rollback attack would actually do damage,
+	# so the hard block belongs here instead.
+	_regressed="$(printf '%s\n' "$_check_out" | sed -n 's/^manifest_regressed=//p')"
+	if [ "$_regressed" = "1" ]; then
+		ota_status "failed" "refusing to download: manifest is older than one previously seen by this router"
+		ota_print_context "$_check_out"
+		echo "error=stale-manifest"
 		return 1
 	fi
 	_url="$(printf '%s\n' "$_check_out" | sed -n 's/^url=//p')"
@@ -398,13 +427,22 @@ cmd_verify() {
 		echo "error=no-image"
 		return 1
 	fi
-	local _check_out _result _sha256 _got_sha
+	local _check_out _result _regressed _sha256 _got_sha
 	_check_out="$(cmd_check)" || { ota_print_context "$_check_out"; return 1; }
 	_result="$(printf '%s\n' "$_check_out" | sed -n 's/^result=//p')"
 	_sha256="$(printf '%s\n' "$_check_out" | sed -n 's/^sha256=//p')"
 	if [ "$_result" != "update-available" ] || [ -z "$_sha256" ]; then
 		ota_print_context "$_check_out"
 		echo "error=no-update-available"
+		return 1
+	fi
+	# Same hard block as cmd_download, re-derived fresh rather than trusted
+	# from an earlier download's belief -- see the anti-replay comment in
+	# cmd_check for why this lives at verify/download/apply and not check.
+	_regressed="$(printf '%s\n' "$_check_out" | sed -n 's/^manifest_regressed=//p')"
+	if [ "$_regressed" = "1" ]; then
+		echo "result=error"
+		echo "error=stale-manifest"
 		return 1
 	fi
 	_got_sha="$(sha256sum "$_img" 2>/dev/null | cut -d' ' -f1)"
