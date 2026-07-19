@@ -4897,3 +4897,4 @@ CONFIG_STRACE_NONE=y
 # CONFIG_PACKAGE_v4l-utils is not set
 # CONFIG_PACKAGE_whereis is not set
 # end of Utilities
+CONFIG_PACKAGE_apk-mbedtls=y
