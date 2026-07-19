@@ -198,11 +198,30 @@ void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remov
 	
 			char* rm_status_path = get_string_map_element(pkg_status_paths, pkg_name);
 			string_map* rm_status_data = get_string_map_element(path_to_status_data, rm_status_path);
-		
-			remove_individual_package(pkg_name, conf, package_data, tmp_dir, save_conf_files, 0);
-		
-			string_map* already_removed = remove_string_map_element(rm_status_data, pkg_name);
-			destroy_string_map(already_removed, DESTROY_MODE_FREE_VALUES, &num_destroyed); //fix this at some point, not freed properly
+
+			int rm_ok = remove_individual_package(pkg_name, conf, package_data, tmp_dir, save_conf_files, 0);
+
+			if(rm_ok)
+			{
+				string_map* already_removed = remove_string_map_element(rm_status_data, pkg_name);
+				destroy_string_map(already_removed, DESTROY_MODE_FREE_VALUES, &num_destroyed); //fix this at some point, not freed properly
+			}
+			else
+			{
+				/* Removal did not actually happen (e.g. the apk backend has
+				 * no transaction record for a package baked into the image
+				 * at build time -- see remove_individual_package_apk).
+				 * Restore its status to installed instead of leaving it
+				 * recorded as half-installed, or -- the bug this fixes --
+				 * silently marking it removed while its files are still on
+				 * disk. Confirmed live on a real GL-MT6000. */
+				string_map* rm_pkg_status_data = get_string_map_element(rm_status_data, pkg_name);
+				if(rm_pkg_status_data != NULL)
+				{
+					char* old_status = set_string_map_element(rm_pkg_status_data, "Status", strdup("install ok installed"));
+					free_if_not_null(old_status);
+				}
+			}
 		}
 	}
 	for(main_status_path_index=0;main_status_path_index < num_main_status_paths; main_status_path_index++)
@@ -285,25 +304,42 @@ void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remov
 			}
 
 
+			int* orphaned_depend_removed = malloc(sizeof(int) * orphaned_deps_found);
 			for(orphaned_depend_index=0; orphaned_depend_index < orphaned_deps_found; orphaned_depend_index++)
 			{
 				//remove the package
-				remove_individual_package(orphaned_depend_list[orphaned_depend_index], conf, package_data, tmp_dir, save_conf_files, 1);
+				orphaned_depend_removed[orphaned_depend_index] = remove_individual_package(orphaned_depend_list[orphaned_depend_index], conf, package_data, tmp_dir, save_conf_files, 1);
 			}
-			
-			
+
+
 			for(orphaned_depend_index=0; orphaned_depend_index < orphaned_deps_found; orphaned_depend_index++)
 			{
-				//remove from status data
 				char* status_path = get_string_map_element(pkg_status_paths, orphaned_depend_list[orphaned_depend_index]);
 				string_map* status_data = get_string_map_element(path_to_status_data, status_path);
 
-				string_map* dep_already_removed = remove_string_map_element(status_data, orphaned_depend_list[orphaned_depend_index]);
-				free_all_package_versions(dep_already_removed);
-
-
+				if(orphaned_depend_removed[orphaned_depend_index])
+				{
+					//remove from status data
+					string_map* dep_already_removed = remove_string_map_element(status_data, orphaned_depend_list[orphaned_depend_index]);
+					free_all_package_versions(dep_already_removed);
+				}
+				else
+				{
+					/* Removal did not actually happen -- restore installed
+					 * status instead of leaving this half-installed or
+					 * silently marking it removed. See the matching fix
+					 * above in the main removal loop for the full
+					 * explanation (confirmed live on a real GL-MT6000). */
+					string_map* dep_status_data = get_package_current_or_latest(status_data, orphaned_depend_list[orphaned_depend_index], NULL, NULL);
+					if(dep_status_data != NULL)
+					{
+						char* old_status = set_string_map_element(dep_status_data, "Status", strdup("install ok installed"));
+						free_if_not_null(old_status);
+					}
+				}
 			}
-			
+			free(orphaned_depend_removed);
+
 			// save each updated status file
 			for(changed_status_index=0; changed_status_index < num_changed_status_paths; changed_status_index++)
 			{
@@ -332,10 +368,19 @@ void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remov
  * writes only its own db, not gpkg's per-package control files) -- so
  * removal has to go through apk too, or nothing would actually get
  * removed (the legacy list-file-driven logic would just find no files
- * to touch and silently no-op). gpkg's own bookkeeping status entry for
- * this dest is reconciled by the completely unchanged do_remove() status-
- * file code that calls this function, exactly as it already is for
- * every dest, backend or not.
+ * to touch and silently no-op).
+ *
+ * Returns 1 if apk actually removed the package, 0 if it did not. This
+ * matters: a package that was baked into the image at build time (as
+ * opposed to genuinely installed later through a real apk transaction)
+ * has no entry in apk's own database, so apk_del_mainroot correctly
+ * reports "No such package" and removes nothing -- confirmed live on a
+ * real GL-MT6000 (2026-07). do_remove() must NOT treat that as success:
+ * doing so previously deleted the package's gpkg bookkeeping status
+ * entry (so `gpkg list-installed` falsely reported it removed) while its
+ * actual files were left untouched on disk -- a silent, misleading
+ * partial failure, not a real removal. The caller now checks this return
+ * value and only reconciles bookkeeping when it's true.
  *
  * --autoremove-same-dest for the main root becomes a harmless no-op by
  * construction, not by any special-casing here: apk_del_mainroot always
@@ -346,7 +391,7 @@ void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remov
  * status:["installed"] in that fresh query -- gpkg's own orphan search
  * (which only considers packages still `dep_is_installed`) simply never
  * queues it for its own removal pass. See goldens/ALLOWLIST.md. */
-void remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orphaned_dependency)
+int remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orphaned_dependency)
 {
 	int ok;
 
@@ -362,14 +407,19 @@ void remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orpha
 	ok = apk_del_mainroot(conf->apk_root, pkg_name);
 	if(!ok)
 	{
-		fprintf(stderr, "ERROR: apk failed to remove package %s from the main root\n", pkg_name);
+		fprintf(stderr, "ERROR: apk failed to remove package %s from the main root -- "
+			"this package has no record in apk's own transaction database (typical "
+			"of a package baked into the image at build time rather than genuinely "
+			"apk-installed later). Its files were NOT removed; it remains installed.\n",
+			pkg_name);
 	}
 
-	printf("Finished removing %s.\n\n", pkg_name);
+	printf(ok ? "Finished removing %s.\n\n" : "Failed to remove %s -- left in place.\n\n", pkg_name);
+	return ok;
 }
 
 
-void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* package_data, char* tmp_dir, int save_conf_files, int is_orphaned_dependency)
+int remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* package_data, char* tmp_dir, int save_conf_files, int is_orphaned_dependency)
 {
 	string_map* install_pkg_data    = get_package_current_or_latest(package_data, pkg_name, NULL, NULL);
 
@@ -378,8 +428,7 @@ void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* pack
 
 	if(gpkg_using_apk_backend() && install_root_path != NULL && safe_strcmp(install_root_path, conf->apk_root) == 0)
 	{
-		remove_individual_package_apk(pkg_name, conf, is_orphaned_dependency);
-		return;
+		return remove_individual_package_apk(pkg_name, conf, is_orphaned_dependency);
 	}
 
 	char* link_root_name            = get_string_map_element(install_pkg_data, "Link-Destination");
@@ -507,10 +556,11 @@ void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* pack
 	free_if_not_null(list_file_name);
 	free_if_not_null(link_file_name);
 	free_if_not_null(conf_file_name);
-	destroy_string_map(copied_conf_files, DESTROY_MODE_FREE_VALUES, &num_destroyed); 
+	destroy_string_map(copied_conf_files, DESTROY_MODE_FREE_VALUES, &num_destroyed);
 
 	printf("Finished removing %s.\n\n", pkg_name);
 
+	return 1;
 }
 
 

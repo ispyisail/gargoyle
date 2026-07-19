@@ -196,8 +196,8 @@ void update(opkg_conf* conf);
 
 /* remove.c */
 void do_remove(opkg_conf* conf, string_map* pkgs, int save_conf_files, int remove_orphaned_depends, int force, int warn_if_forced, char* tmp_root);
-void remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* package_data, char* tmp_dir, int save_conf_files, int is_orphaned_dependency);
-void remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orphaned_dependency);
+int remove_individual_package(char* pkg_name, opkg_conf* conf, string_map* package_data, char* tmp_dir, int save_conf_files, int is_orphaned_dependency);
+int remove_individual_package_apk(char* pkg_name, opkg_conf* conf, int is_orphaned_dependency);
 int run_script_if_exists(char* install_root_path, char* install_link_path, char* pkg_name, char* script_type_postfix, char* action_arg);
 
 /* install.c */
