@@ -26,6 +26,97 @@ function getBackup()
 	runAjax("POST", "utility/run_commands.sh", param, stateChangeFunction);
 }
 
+/* --- Settings Profile (RFC #97) ------------------------------------- */
+
+function getProfile()
+{
+	// export generates and streams in one GET (see profile_export.sh)
+	window.location = "utility/profile_export.sh";
+}
+
+function importProfile()
+{
+	if(document.getElementById('profile_file').value.length == 0)
+	{
+		alert(bkS.ProfSelErr);
+		return;
+	}
+	if( !window.confirm(bkS.ProfImpConfirm) )
+	{
+		return;
+	}
+	document.getElementById('profile_import_hash').value = document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, "");
+	document.getElementById('profile_import_form').submit();
+	setControlsEnabled(false, true, bkS.ProfImping);
+}
+
+function profileImportFailed()
+{
+	setControlsEnabled(true);
+	alert(bkS.ProfImpErr);
+}
+
+// Called from the hidden import iframe with the parsed report object.
+function profileImportComplete(report)
+{
+	setControlsEnabled(true);
+
+	var container = document.getElementById("profile_import_report");
+	while(container.firstChild) { container.removeChild(container.firstChild); }
+
+	var s = report && report.summary ? report.summary : { applied:0, adapted:0, deferred:0, dropped:0 };
+	var summary = document.createElement("div");
+	summary.className = "col-xs-12";
+	var needsReview = (s.adapted + s.deferred + s.dropped);
+	var msg = document.createElement("p");
+	msg.appendChild(document.createTextNode(
+		bkS.ProfResult
+			.replace(/%applied%/, s.applied)
+			.replace(/%review%/, needsReview) ));
+	summary.appendChild(msg);
+	container.appendChild(summary);
+
+	var entries = (report && report.entries) ? report.entries : [];
+	if(entries.length > 0)
+	{
+		var wrap = document.createElement("div");
+		wrap.className = "col-xs-12 table-responsive";
+		var table = document.createElement("table");
+		table.className = "table table-condensed";
+		var thead = document.createElement("thead");
+		var htr = document.createElement("tr");
+		[ bkS.ProfColFeat, bkS.ProfColField, bkS.ProfColOutcome, bkS.ProfColReason ].forEach(function(h)
+		{
+			var th = document.createElement("th");
+			th.appendChild(document.createTextNode(h));
+			htr.appendChild(th);
+		});
+		thead.appendChild(htr);
+		table.appendChild(thead);
+
+		var tbody = document.createElement("tbody");
+		var rowClass = { applied:"success", adapted:"warning", deferred:"info", dropped:"danger" };
+		var outcomeLabel = { applied:bkS.ProfOutApplied, adapted:bkS.ProfOutAdapted, deferred:bkS.ProfOutDeferred, dropped:bkS.ProfOutDropped };
+		entries.forEach(function(e)
+		{
+			var tr = document.createElement("tr");
+			if(rowClass[e.outcome]) { tr.className = rowClass[e.outcome]; }
+			[ e.feature, e.field, (outcomeLabel[e.outcome] || e.outcome), (e.reason || "") ].forEach(function(cell)
+			{
+				var td = document.createElement("td");
+				td.appendChild(document.createTextNode(cell));
+				tr.appendChild(td);
+			});
+			tbody.appendChild(tr);
+		});
+		table.appendChild(tbody);
+		wrap.appendChild(table);
+		container.appendChild(wrap);
+	}
+
+	container.style.display = "";
+}
+
 function doRestore()
 {
 	if(document.getElementById('restore_file').value.length == 0)
