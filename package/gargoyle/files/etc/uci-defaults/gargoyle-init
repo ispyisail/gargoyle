@@ -158,6 +158,8 @@ cat << EOF >/etc/sysupgrade.conf
 /usr/data
 /etc/tor
 /etc/gargoyle_default_ifs
+/etc/openvpn
+/etc/samba/smbpasswd
 EOF
 
 

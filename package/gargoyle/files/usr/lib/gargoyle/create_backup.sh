@@ -18,7 +18,13 @@ if [ -n "$webmon_enabled" ] ; then
 	/etc/init.d/webmon_gargoyle stop
 fi
 
-backup_locations='/etc/passwd /etc/shadow /etc/config /etc/rc.d /etc/TZ /etc/firewall.user /etc/ethers /etc/hosts /etc/webmon_ips /etc/crontabs /etc/dropbear /etc/samba/smbpasswd /tmp/data /usr/data /etc/openvpn '
+# Everything sysupgrade would already preserve (its own conf file plus
+# every plugin's keep.d fragment -- see /sbin/sysupgrade's own reading of
+# these two, RFC #98) is exactly what a full backup should also capture,
+# plus two backup-only extras that are transient runtime state, not config,
+# and must never survive an in-place sysupgrade: /tmp/data and /usr/data.
+backup_only_extras='/tmp/data /usr/data'
+backup_locations="$(cat /etc/sysupgrade.conf /lib/upgrade/keep.d/* 2>/dev/null) $backup_only_extras"
 existing_locations=""
 for bl in $backup_locations ; do
 	if [ -e "$bl" ] ; then
@@ -31,7 +37,45 @@ if [ -e /tmp/backup ] ; then
 fi
 mkdir -p /tmp/backup
 cd /tmp/backup
-tar cvzf backup.tar.gz $existing_locations 2>/dev/null
+
+# RFC #98 B2: a manifest inside the tarball, so a future restore can
+# validate board/version/plugin-set before extracting (RFC #98 Phase P2 --
+# not built yet, this just writes the data it will need).
+gargoyle_version="$(uci -q get gargoyle.global.version)"
+openwrt_release="$(cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_RELEASE | cut -d "'" -f 2)"
+board_name="$(ubus call system board 2>/dev/null | jsonfilter -e '@.board_name')"
+gen_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+installed_plugins="$(opkg list-installed 2>/dev/null | grep '^plugin-gargoyle-' | awk '{print $1}' | sort | tr '\n' ' ')"
+
+manifest_paths_json=""
+for bl in $existing_locations ; do
+	if [ -n "$manifest_paths_json" ] ; then
+		manifest_paths_json="$manifest_paths_json,"
+	fi
+	manifest_paths_json="$manifest_paths_json\"$bl\""
+done
+
+manifest_plugins_json=""
+for pl in $installed_plugins ; do
+	if [ -n "$manifest_plugins_json" ] ; then
+		manifest_plugins_json="$manifest_plugins_json,"
+	fi
+	manifest_plugins_json="$manifest_plugins_json\"$pl\""
+done
+
+cat > gargoyle-backup-manifest.json <<EOF
+{
+	"schema": 1,
+	"gargoyle_version": "$gargoyle_version",
+	"openwrt_release": "$openwrt_release",
+	"board_name": "$board_name",
+	"generated": "$gen_time",
+	"paths": [$manifest_paths_json],
+	"plugins": [$manifest_plugins_json]
+}
+EOF
+
+tar cvzf backup.tar.gz $existing_locations gargoyle-backup-manifest.json 2>/dev/null
 chmod 777 backup.tar.gz
 garg_web_root=$(uci get gargoyle.global.web_root)
 if [ -z "$garg_web_root" ] ; then
