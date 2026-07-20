@@ -231,3 +231,45 @@ cap_wpa3_supported()
 		*)              echo 1 ;;
 	esac
 }
+
+# cap_lan_ports -> space-separated list of the target's DSA LAN switch port
+# roles from board.json (network.lan.ports), e.g. "lan1 lan2 lan3 lan4".
+# Empty when the board has no switch-port array (non-DSA / single-LAN devices).
+# This is the same board.json field vlan.sh gates the whole VLAN Manager on.
+cap_lan_ports()
+{
+	_cap_ports=""
+	if _cap_load_board && json_is_a network object ; then
+		json_select network
+		if json_is_a lan object ; then
+			json_select lan
+			if json_is_a ports array ; then
+				json_select ports
+				json_get_values _cap_pv
+				_cap_ports="$_cap_pv"
+				json_select ..
+			fi
+			json_select ..
+		fi
+		json_select ..
+	fi
+	echo "$_cap_ports"
+}
+
+# cap_lan_port_count -> number of DSA LAN switch ports (0 if none).
+cap_lan_port_count()
+{
+	_cap_n=0
+	for _cap_p in $(cap_lan_ports) ; do _cap_n=$(( _cap_n + 1 )) ; done
+	echo "$_cap_n"
+}
+
+# cap_port_role_exists <name> -> 1 if <name> is a LAN port on this board.
+cap_port_role_exists()
+{
+	_cap_want="$1"
+	for _cap_p in $(cap_lan_ports) ; do
+		[ "$_cap_p" = "$_cap_want" ] && { echo 1 ; return ; }
+	done
+	echo 0
+}
