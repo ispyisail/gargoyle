@@ -215,3 +215,19 @@ cap_mode_supported()
 	fi
 	echo "$_cap_found"
 }
+
+# cap_wpa3_supported -> 1 if this image can run WPA3-Personal (SAE) as an AP.
+# SAE needs a full wpad/hostapd crypto build (mbedtls/openssl/wolfssl); the
+# size-optimised wpad-basic* / wpad-mini variants omit it. This is not a
+# board.json fact (encryption is a software capability, not a radio one), so
+# it reads the installed wpad package variant. Conservative default (0) when
+# nothing is detected.
+cap_wpa3_supported()
+{
+	_cap_wpad=$(opkg list-installed 2>/dev/null | grep '^wpad' | head -1 | awk '{print $1}')
+	case "$_cap_wpad" in
+		*basic*|*mini*) echo 0 ;;
+		"")             echo 0 ;;
+		*)              echo 1 ;;
+	esac
+}
