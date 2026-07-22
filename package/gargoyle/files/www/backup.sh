@@ -64,6 +64,49 @@
 
 	<iframe id="reboot_test" onload="reloadPage()" style="display:none" ></iframe>
 </div>
+
+<h2 class="page-header"><%~ backup.ProfC %></h2>
+<div class="row">
+	<div class="col-lg-12">
+		<div class="alert alert-info"><%~ backup.ProfDesc %></div>
+	</div>
+
+	<div class="col-lg-6">
+		<div class="panel panel-default">
+			<div class="panel-heading">
+				<h3 class="panel-title"><%~ backup.ProfExpC %></h3>
+			</div>
+			<div id="profile_export_section" class="panel-body">
+				<div class="row form-group">
+					<span class="col-xs-12"><button id="profile_export_button" class="btn btn-success btn-lg" onclick="getProfile()"><%~ backup.ProfExpBtn %></button></span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="col-lg-6">
+		<div class="panel panel-default">
+			<div class="panel-heading">
+				<h3 class="panel-title"><%~ backup.ProfImpC %></h3>
+			</div>
+			<div id="profile_import_section" class="panel-body">
+				<form id="profile_import_form" enctype="multipart/form-data" method="post" action="utility/profile_import.sh" target="do_profile_import">
+					<div class="row form-group">
+						<label class="col-xs-5"><%~ backup.ProfSelF %>:</label>
+						<span class="col-xs-7"><input type="file" id="profile_file" name="profile_file" /></span>
+						<input id="profile_import_hash" name="hash" type="hidden" value=""/>
+					</div>
+					<br />
+				</form>
+				<div class="row form-group">
+					<span class="col-xs-12"><button id="profile_import_button" class="btn btn-warning btn-lg" onclick="importProfile()"><%~ backup.ProfImpBtn %></button></span>
+				</div>
+				<div id="profile_import_report" class="row" style="display:none"></div>
+				<iframe id="do_profile_import" name="do_profile_import" src="#" style="display:none"></iframe>
+			</div>
+		</div>
+	</div>
+</div>
 <%
 	gargoyle_header_footer -f -s "system" -p "backup"
 %>
