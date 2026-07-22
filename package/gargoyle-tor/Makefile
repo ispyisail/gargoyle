@@ -124,6 +124,7 @@ endef
 
 define Package/gargoyle-tor/conffiles
 /etc/tor/torrc
+/etc/tor
 /var/lib/tor/fingerprint
 /var/lib/tor/keys/*
 /etc/config/tor
