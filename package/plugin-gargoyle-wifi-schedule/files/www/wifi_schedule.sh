@@ -11,7 +11,11 @@
 <%
 	echo "var cron_data = new Array();"
 	if [ -e /etc/crontabs/root ] ; then
-		awk '{gsub(/"/, "\\\""); print "cron_data.push(\""$0"\");" }' /etc/crontabs/root
+		# Escape with sed (consistent everywhere), not awk gsub -- busybox awk
+		# (what the firmware ships) handles backslashes in gsub's replacement
+		# string differently from gawk, leaving the quotes unescaped and
+		# producing invalid JS that breaks the whole inline <script>.
+		sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' /etc/crontabs/root | awk '{print "cron_data.push(\""$0"\");"}'
 	fi
 	echo "var weekly_time=\"`date \"+%w-%H-%M\"`\";"
 
