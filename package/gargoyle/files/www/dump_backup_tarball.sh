@@ -8,6 +8,11 @@
 	eval $( gargoyle_session_validator -c "$COOKIE_hash" -e "$COOKIE_exp" -a "$HTTP_USER_AGENT" -i "$REMOTE_ADDR" -r "login.sh" -t $(uci get gargoyle.global.session_timeout) -b "$COOKIE_browser_time"  )
 
 	BACKUP="backup_"$(uci -q get system.@system[0].hostname | sed 's/ //g')"_"$(date +%Y%m%d_%H%M%S)".tar.gz"
+	# RFC #117: an encrypted backup carries the GARGENC1 magic; give it a .enc
+	# suffix so the user can tell at a glance it needs a passphrase to restore.
+	if [ "$(dd if=/tmp/backup/backup.tar.gz bs=8 count=1 2>/dev/null)" = "GARGENC1" ] ; then
+		BACKUP="${BACKUP}.enc"
+	fi
 	echo "Content-type: application/octet-stream"
 	echo "Content-disposition: attachment;filename=\"$BACKUP\""
 	echo ""
