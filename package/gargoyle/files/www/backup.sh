@@ -17,6 +17,25 @@
 			</div>
 			<div id="backup_section" class="panel-body">
 				<div class="row form-group">
+					<span class="col-xs-12">
+						<input type="checkbox" id="backup_encrypt" onchange="toggleBackupEncrypt()"/>
+						<label class="short-left-pad" for="backup_encrypt"><%~ backup.EncBackup %></label>
+					</span>
+				</div>
+				<div id="backup_encrypt_fields" style="display:none">
+					<div class="row form-group">
+						<label class="col-xs-5" for="backup_pass1"><%~ backup.EncPass %>:</label>
+						<span class="col-xs-7"><input type="password" id="backup_pass1" class="form-control" autocomplete="new-password"/></span>
+					</div>
+					<div class="row form-group">
+						<label class="col-xs-5" for="backup_pass2"><%~ backup.EncPassConf %>:</label>
+						<span class="col-xs-7"><input type="password" id="backup_pass2" class="form-control" autocomplete="new-password"/></span>
+					</div>
+					<div class="row form-group">
+						<span class="col-xs-12 alert alert-warning"><%~ backup.EncWarn %></span>
+					</div>
+				</div>
+				<div class="row form-group">
 					<span class="col-xs-12"><button id="backup_button" class="btn btn-success btn-lg" onclick="getBackup()"><%~ GetBackup %></button></span>
 				</div>
 			</div>
@@ -35,6 +54,11 @@
 						<span class="col-xs-7"><input type="file" id="restore_file" name="restore_file" /></span>
 						<input id="restore_hash" name="hash" type="hidden" value=""/>
 					</div>
+					<div class="row form-group">
+						<label class="col-xs-5" for="restore_passphrase"><%~ backup.RestPass %>:</label>
+						<span class="col-xs-7"><input type="password" id="restore_passphrase" name="restore_passphrase" class="form-control" autocomplete="off"/></span>
+					</div>
+					<div class="row"><span class="col-xs-12 help-block"><%~ backup.RestPassHint %></span></div>
 					<br />
 				</form>
 				<div class="row form-group">

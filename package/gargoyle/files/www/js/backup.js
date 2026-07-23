@@ -10,10 +10,32 @@ var bkS=new Object(); //part of i18n
 var toggleReload = false;
 var globalLanIp;
 
+function toggleBackupEncrypt()
+{
+	var on = document.getElementById("backup_encrypt").checked;
+	document.getElementById("backup_encrypt_fields").style.display = on ? "block" : "none";
+}
+
 function getBackup()
 {
+	// RFC #117: run create_backup (optionally encrypting) via a dedicated CGI
+	// that carries the passphrase as a POST field -> env var, never on argv,
+	// then download the produced file. Non-encrypted backups use the same path
+	// with an empty passphrase.
+	var encrypt = document.getElementById("backup_encrypt").checked;
+	var p1 = document.getElementById("backup_pass1").value;
+	var p2 = document.getElementById("backup_pass2").value;
+	if(encrypt)
+	{
+		if(p1.length == 0)         { alert(bkS.EncPassEmpty); return; }
+		if(p1 != p2)               { alert(bkS.EncPassMismatch); return; }
+	}
+
 	setControlsEnabled(false, true, bkS.PrepBack);
-	var param = getParameterDefinition("commands", "sh /usr/lib/gargoyle/create_backup.sh ;\n" )  + "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
+	var hash = document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, "");
+	var param = getParameterDefinition("hash", hash)
+		+ "&" + getParameterDefinition("encrypt", encrypt ? "1" : "0")
+		+ "&" + getParameterDefinition("passphrase", encrypt ? p1 : "");
 
 	var stateChangeFunction = function(req)
 	{
@@ -23,7 +45,7 @@ function getBackup()
 			window.location="/dump_backup_tarball.sh"
 		}
 	}
-	runAjax("POST", "utility/run_commands.sh", param, stateChangeFunction);
+	runAjax("POST", "utility/create_backup_run.sh", param, stateChangeFunction);
 }
 
 /* --- Settings Profile (RFC #97) ------------------------------------- */
@@ -145,10 +167,13 @@ function doDefaultRestore()
 	}
 
 }
-function restoreFailed()
+function restoreFailed(passphraseIssue)
 {
 	setControlsEnabled(true);
-	alert(bkS.FailErr);
+	// RFC #117: restore.sh signals a decryption problem (encrypted backup with
+	// a missing/wrong passphrase) by passing true, so we can point the user at
+	// the passphrase field instead of the generic "invalid file" message.
+	alert(passphraseIssue ? bkS.RestPassErr : bkS.FailErr);
 }
 
 function restoreSuccessful(lanIp)

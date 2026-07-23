@@ -76,6 +76,20 @@ cat > gargoyle-backup-manifest.json <<EOF
 EOF
 
 tar cvzf backup.tar.gz $existing_locations gargoyle-backup-manifest.json 2>/dev/null
+
+# RFC #117: if a passphrase was supplied (GARGOYLE_BACKUP_PASS, set by the
+# create_backup CGI from the admin's form -- never on argv), encrypt the
+# tarball at rest with AES-256-GCM + PBKDF2 via mbedtls-clu. The encrypted
+# file replaces backup.tar.gz and is detected on restore by its GARGENC1
+# magic, so the download name and the restore flow need no extension change.
+if [ -n "$GARGOYLE_BACKUP_PASS" ] && command -v mbedtls >/dev/null 2>&1 ; then
+	if mbedtls enc -pass env:GARGOYLE_BACKUP_PASS -in backup.tar.gz -out backup.tar.gz.enc 2>/dev/null && [ -s backup.tar.gz.enc ] ; then
+		mv backup.tar.gz.enc backup.tar.gz
+	else
+		rm -f backup.tar.gz.enc
+	fi
+fi
+
 chmod 777 backup.tar.gz
 garg_web_root=$(uci get gargoyle.global.web_root)
 if [ -z "$garg_web_root" ] ; then

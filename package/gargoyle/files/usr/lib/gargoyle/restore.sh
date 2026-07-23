@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# This program is copyright © 2008-2010 Eric Bishop and is distributed under the terms of the GNU GPL 
+# This program is copyright ï¿½ 2008-2010 Eric Bishop and is distributed under the terms of the GNU GPL 
 # version 2.0 with a special clarification/exception that permits adapting the program to 
 # configure proprietary "back end" software provided that all modifications to the web interface
 # itself remain covered by the GPL. 
@@ -8,6 +8,7 @@
 
 restore_file="$1"
 restore_password="$2"
+restore_passphrase="$3"
 if [ -z "$restore_password" ] ; then
 	restore_password=0
 fi
@@ -33,6 +34,28 @@ if [ ! -e "$restore_file" ] ; then
 	rm -rf /tmp/restore_lock_file
 	exit
 else
+	# RFC #117: an encrypted backup begins with the GARGENC1 magic. Decrypt it
+	# (AES-256-GCM, mbedtls-clu) before any validation/extraction. A wrong or
+	# missing passphrase fails the GCM tag and aborts -- never a partial restore.
+	restore_magic=$(dd if="$restore_file" bs=8 count=1 2>/dev/null)
+	if [ "$restore_magic" = "GARGENC1" ] ; then
+		if [ -z "$restore_passphrase" ] || ! command -v mbedtls >/dev/null 2>&1 ; then
+			echo "<script type=\"text/javascript\">top.restoreFailed(true);</script>"
+			echo "</body></html>"
+			rm -rf /tmp/restore_lock_file
+			exit
+		fi
+		rm -f /tmp/restore_decrypted.tar.gz
+		RESTORE_PASS="$restore_passphrase" mbedtls dec -pass env:RESTORE_PASS -in "$restore_file" -out /tmp/restore_decrypted.tar.gz 2>/dev/null
+		if [ ! -s /tmp/restore_decrypted.tar.gz ] ; then
+			rm -f /tmp/restore_decrypted.tar.gz
+			echo "<script type=\"text/javascript\">top.restoreFailed(true);</script>"
+			echo "</body></html>"
+			rm -rf /tmp/restore_lock_file
+			exit
+		fi
+		restore_file="/tmp/restore_decrypted.tar.gz"
+	fi
 	tar xzf "$restore_file" -O >/dev/null 2>error
 	error=$(cat error)
 	if [ -n "$error" ] ; then
@@ -209,6 +232,7 @@ cd /tmp
 if [ -e /tmp/restore ] ; then
 	rm -rf /tmp/restore
 fi
+rm -f /tmp/restore_decrypted.tar.gz
 
 new_ip=$(uci get network.lan.ipaddr)
 
