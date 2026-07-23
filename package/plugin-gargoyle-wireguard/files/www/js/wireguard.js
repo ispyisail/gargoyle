@@ -701,7 +701,15 @@ function setAcDocumentFromUci(srcUci, id, dupeCn, serverInternalIp)
 	var subnetMask = srcUci.get("wireguard_gargoyle", id, "subnet_mask")
 
 	setSelectedValue("wireguard_allowed_client_have_subnet", (subnetIp != "" && subnetMask != "" ? "true" : "false"), document)
-	subnetIp   = subnetIp   == "" ? "192.168.2.1" : subnetIp;
+	// Prefill an obscure-but-valid RFC1918 subnet as a format example. The old
+	// default (192.168.2.0/24) collided with the LAN Gargoyle auto-relocates
+	// to behind a 192.168.1.1 upstream (the common double-NAT case), so a user
+	// who enabled "route the subnet below" without editing it routed their own
+	// LAN into the tunnel and locked themselves out (forum thread 18405). An
+	// obscure third octet won't match a real LAN, the WireGuard server subnet
+	// (10.64.0.0/24 default), or GL.iNet's 192.168.8.0/24 -- and validateAc()
+	// now also rejects a routed subnet that overlaps either, as a backstop.
+	subnetIp   = subnetIp   == "" ? "192.168.177.1" : subnetIp;
 	subnetMask = subnetMask == "" ? "255.255.255.0" : subnetMask;
 	document.getElementById("wireguard_allowed_client_subnet_ip").value = subnetIp;
 	document.getElementById("wireguard_allowed_client_subnet_mask").value = subnetMask;
@@ -971,6 +979,33 @@ function validateAc(internalServerIp, internalServerMask)
 		var subnetIpEl   = document.getElementById(prefix + "subnet_ip")
 		var subnetMaskEl = document.getElementById(prefix + "subnet_mask")
 		subnetIpEl.value = applyMask(subnetIpEl.value, subnetMaskEl.value)
+
+		// Backstop for the lockout in forum thread 18405: a routed "subnet
+		// behind client" that overlaps the router's own LAN or the WireGuard
+		// server subnet sends that traffic into the tunnel instead of locally.
+		// Two subnets overlap when their network addresses match under the
+		// less-specific (shorter) of the two masks. Refuse the save rather
+		// than let the admin route their own management network away.
+		var subNet  = parseIp(subnetIpEl.value)
+		var subMask = parseMask(subnetMaskEl.value)
+		var subnetsOverlap = function(net1, mask1, net2, mask2)
+		{
+			var common = mask1 & mask2
+			return (net1 & common) == (net2 & common)
+		}
+		if( typeof currentLanIp != "undefined" && typeof currentLanMask != "undefined" )
+		{
+			var lanMask = parseMask(currentLanMask)
+			if( subnetsOverlap(subNet, subMask, parseIp(currentLanIp) & lanMask, lanMask) )
+			{
+				errors.push(wgStr.SubOvLan)
+			}
+		}
+		var wgSrvMask = parseMask(internalServerMask)
+		if( subnetsOverlap(subNet, subMask, parseIp(internalServerIp) & wgSrvMask, wgSrvMask) )
+		{
+			errors.push(wgStr.SubOvWg)
+		}
 	}
 	if(errors.length == 0 && document.getElementById(prefix + "subnet_ip6_container").style.display != "none")
 	{
