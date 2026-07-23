@@ -79,14 +79,19 @@ tar cvzf backup.tar.gz $existing_locations gargoyle-backup-manifest.json 2>/dev/
 
 # RFC #117: if a passphrase was supplied (GARGOYLE_BACKUP_PASS, set by the
 # create_backup CGI from the admin's form -- never on argv), encrypt the
-# tarball at rest with AES-256-GCM + PBKDF2 via mbedtls-clu. The encrypted
-# file replaces backup.tar.gz and is detected on restore by its GARGENC1
-# magic, so the download name and the restore flow need no extension change.
+# tarball at rest via mbedtls-clu's openssl-compatible `enc`
+# (AES-256-CBC + PBKDF2, openssl's "Salted__" container). The encrypted
+# file replaces backup.tar.gz and is detected on restore by that magic, so
+# the download name and restore flow need no extension change. Because the
+# format is byte-compatible with `openssl enc`, the download can also be
+# decrypted on a PC with:
+#   openssl enc -d -aes-256-cbc -pbkdf2 -in backup.tar.gz | tar xz
 if [ -n "$GARGOYLE_BACKUP_PASS" ] && command -v mbedtls >/dev/null 2>&1 ; then
-	if mbedtls enc -pass env:GARGOYLE_BACKUP_PASS -in backup.tar.gz -out backup.tar.gz.enc 2>/dev/null && [ -s backup.tar.gz.enc ] ; then
+	if mbedtls enc -aes-256-cbc -pbkdf2 -salt -pass env:GARGOYLE_BACKUP_PASS -in backup.tar.gz -out backup.tar.gz.enc 2>/dev/null && [ -s backup.tar.gz.enc ] ; then
 		mv backup.tar.gz.enc backup.tar.gz
 	else
-		rm -f backup.tar.gz.enc
+		# never hand back an unencrypted file when encryption was requested
+		rm -f backup.tar.gz.enc backup.tar.gz
 	fi
 fi
 

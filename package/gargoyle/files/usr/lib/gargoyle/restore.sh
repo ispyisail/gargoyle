@@ -34,11 +34,14 @@ if [ ! -e "$restore_file" ] ; then
 	rm -rf /tmp/restore_lock_file
 	exit
 else
-	# RFC #117: an encrypted backup begins with the GARGENC1 magic. Decrypt it
-	# (AES-256-GCM, mbedtls-clu) before any validation/extraction. A wrong or
-	# missing passphrase fails the GCM tag and aborts -- never a partial restore.
+	# RFC #117: an encrypted backup begins with openssl's "Salted__" magic.
+	# Decrypt it (mbedtls-clu's openssl-compatible AES-256-CBC + PBKDF2)
+	# before any validation/extraction. A wrong/missing passphrase leaves a
+	# non-tar payload, so the tar validation just below aborts the restore --
+	# never a partial restore. (restoreFailed(true) signals the UI to
+	# re-prompt for the passphrase specifically.)
 	restore_magic=$(dd if="$restore_file" bs=8 count=1 2>/dev/null)
-	if [ "$restore_magic" = "GARGENC1" ] ; then
+	if [ "$restore_magic" = "Salted__" ] ; then
 		if [ -z "$restore_passphrase" ] || ! command -v mbedtls >/dev/null 2>&1 ; then
 			echo "<script type=\"text/javascript\">top.restoreFailed(true);</script>"
 			echo "</body></html>"
@@ -46,7 +49,7 @@ else
 			exit
 		fi
 		rm -f /tmp/restore_decrypted.tar.gz
-		RESTORE_PASS="$restore_passphrase" mbedtls dec -pass env:RESTORE_PASS -in "$restore_file" -out /tmp/restore_decrypted.tar.gz 2>/dev/null
+		RESTORE_PASS="$restore_passphrase" mbedtls enc -d -aes-256-cbc -pbkdf2 -pass env:RESTORE_PASS -in "$restore_file" -out /tmp/restore_decrypted.tar.gz 2>/dev/null
 		if [ ! -s /tmp/restore_decrypted.tar.gz ] ; then
 			rm -f /tmp/restore_decrypted.tar.gz
 			echo "<script type=\"text/javascript\">top.restoreFailed(true);</script>"
