@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mbedtls-clu
 PKG_SOURCE_DATE:=2026-07-23
-PKG_SOURCE_VERSION:=c61e7f0732fed4c81eb877815a7274634eff1753
+PKG_SOURCE_VERSION:=3dcbd52ce2431da3647495ea3f60b5442480a199
 PKG_VERSION:=1.1.0-dev
 PKG_RELEASE:=1
 
@@ -10,7 +10,7 @@ MAKE_PATH:=src
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=https://github.com/ispyisail/mbedtls-clu.git
-PKG_MIRROR_HASH:=4d2873bbb08fb0a85f310652d5c466a043b4debc55db3a7d6f834f54922b7847
+PKG_MIRROR_HASH:=8ec8a73f07af572deee04ca699ad862abcb723a9bd8de9afacf8d25edccabf95
 
 # Set to 1 to dynamically link libericstools, or 0 to static compile
 DLINK_LIBERICSTOOLS:=1
