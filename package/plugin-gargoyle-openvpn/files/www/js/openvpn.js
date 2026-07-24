@@ -1450,6 +1450,13 @@ function togglePass(name)
 function checkSubnetConflict(ip,mask)
 {
 	var ipList = [];
+	// Router LAN -- a routed client subnet that matches the LAN black-holes the
+	// router's own LAN traffic and can lock the admin out (discussion #128).
+	// WireGuard's allowed-client proofread already guards this; mirror it here.
+	if(currentLanIp != "" && currentLanMask != "")
+	{
+		ipList.push(adjustSubnetIp(currentLanIp, currentLanMask));
+	}
 	// OpenVPN IP/subnet
 	var ovpnIp = byId('openvpn_server_ip').value;
 	var ovpnMask = byId('openvpn_server_mask').value;
