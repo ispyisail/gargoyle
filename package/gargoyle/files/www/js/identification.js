@@ -37,9 +37,9 @@ function saveChanges()
 
 
 		// hostname is single-quoted here as defense-in-depth: it reaches this
-		// raw shell echo unescaped, so without validation (validateHostName in
-		// proofreadAll) a hostname like $(reboot) would execute. The validator
-		// forbids quotes/metacharacters, so this single-quoting cannot break.
+		// raw shell echo unescaped, so without validation a hostname like
+		// $(reboot) would execute. The validators forbid quotes/metacharacters,
+		// so this single-quoting cannot break.
 		var commands = uci.getScriptCommands(uciOriginal) + "\necho '" + hostname + "' > /proc/sys/kernel/hostname \n" + (havePrinterScript ? "\nsh /usr/lib/gargoyle/configure_printer.sh\n" : "")
 
 
@@ -62,22 +62,33 @@ function saveChanges()
 	}
 }
 
+// Hostname is specifically limited to not contain any subdomains and is therefore a single DNS Label
+function validateHostName(hostname)
+{
+	if(hostname == null) { return 1; }
+	return hostname.match(/^[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?$/) ? 0 : 1;
+}
+// Domain is validated as dot separated DNS Labels
+function validateDomain(domain)
+{
+	if(domain == null) { return 1; }
+	return domain.match(/^[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)*$/) ? 0 : 1;
+}
+
 function proofreadAll()
 {
-	// validateHostName rejects whitespace/newlines/quotes/metacharacters.
-	// Length-only validation (the old code) let a newline in the domain inject
-	// lines into the generated dnsmasq.conf, and let the hostname carry shell
-	// metacharacters into a raw echo in saveChanges() (command injection).
-	// Found by the GUI chaos hunt, 2026-07-12.
-	var okHost = function(text){ return validateHostName(text); }
+	// The domain field gets validateDomain, not hostname validation: a newline
+	// in the domain injected lines into the generated dnsmasq.conf, and a
+	// hostname carrying shell metacharacters reached a raw echo in
+	// saveChanges(). Found by the GUI chaos hunt, 2026-07-12.
 	var errors;
 	if(!isBridge(uciOriginal))
 	{
-		errors = proofreadFields( ["hostname", "domain"], ["hostname_label", "domain_label"], [okHost, okHost], [0,0], ["hostname", "domain"]);
+		errors = proofreadFields( ["hostname", "domain"], ["hostname_label", "domain_label"], [validateHostName, validateDomain], [0,0], ["hostname", "domain"]);
 	}
 	else
 	{
-		errors = proofreadFields( ["hostname"], ["hostname_label"], [okHost], [0], ["hostname"]);
+		errors = proofreadFields( ["hostname"], ["hostname_label"], [validateHostName], [0], ["hostname"]);
 	}
 	return errors;
 }
