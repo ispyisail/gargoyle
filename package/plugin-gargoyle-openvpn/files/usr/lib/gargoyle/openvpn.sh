@@ -119,6 +119,19 @@ create_server_conf()
 
 	openvpn_extra_subnets="${13}"
 
+	# Clamps TCP MSS for connections crossing the tunnel so the encapsulated
+	# packet fits under a constrained WAN path MTU. Unset by default -- only
+	# needed when the WAN path can't carry a full 1500-byte inner packet plus
+	# OpenVPN's own overhead, which otherwise IP-fragments (throughput loss)
+	# or black-holes silently if a hop along the path drops oversized
+	# datagrams instead of returning "fragmentation needed".
+	openvpn_mssfix="${14}"
+	if [ -n "$openvpn_mssfix" ] ; then
+		openvpn_mssfix_line="mssfix               $openvpn_mssfix"
+	else
+		openvpn_mssfix_line=""
+	fi
+
 	if [ -n "$openvpn_pool" ] ; then
 		openvpn_pool="ifconfig-pool $openvpn_pool"
 	fi
@@ -200,6 +213,7 @@ $openvpn_duplicate_cn
 $openvpn_pool
 
 data-ciphers          $openvpn_cipher
+$openvpn_mssfix_line
 
 dev                   tun
 keepalive             25 180
@@ -663,7 +677,7 @@ regenerate_server_and_allowed_clients_from_uci()
 	. /lib/functions.sh
 	config_load "openvpn_gargoyle"
 	
-	server_vars="internal_ip internal_mask port proto cipher client_to_client duplicate_cn redirect_gateway subnet_access regenerate_credentials subnet_ip subnet_mask pool extra_subnet"
+	server_vars="internal_ip internal_mask port proto cipher client_to_client duplicate_cn redirect_gateway subnet_access regenerate_credentials subnet_ip subnet_mask pool extra_subnet mssfix"
 	for var in $server_vars ; do
 		config_get "$var" "server" "$var"
 	done
@@ -680,7 +694,8 @@ regenerate_server_and_allowed_clients_from_uci()
 				"$pool"                    \
 				"$redirect_gateway"        \
 				"$regenerate_credentials"  \
-				"$extra_subnet"
+				"$extra_subnet"            \
+				"$mssfix"
 
 	server_regenerate_credentials="$regenerate_credentials"
 	config_foreach regenerate_allowed_client_from_uci "allowed_client"
