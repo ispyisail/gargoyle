@@ -41,7 +41,21 @@ define Package/plugin-gargoyle-doh/install
 endef
 
 define Package/plugin-gargoyle-doh/postinst
-	if [ -z "$${IPKG_INSTROOT}" ] ; then 
+	if [ -z "$${IPKG_INSTROOT}" ] ; then
+		# Advisory only -- DoH plus its curl/libcares/libev/ca-bundle deps run
+		# ~900K installed. Below this floor it's the admin's informed call,
+		# not a hard block.
+		flash_kb=$$(df -k /overlay 2>/dev/null | awk 'NR==2{print $$2}')
+		mem_kb=$$(awk '/^MemTotal:/{print $$2}' /proc/meminfo 2>/dev/null)
+		if [ -n "$$flash_kb" ] && [ "$$flash_kb" -lt 16384 ] ; then
+			echo "plugin-gargoyle-doh: warning: this device's writable flash (~$${flash_kb}KB) is below the ~16MB DoH is tested against; the proxy and its TLS/HTTP dependencies use significant space." >&2
+			logger -t plugin-gargoyle-doh "low flash (~$${flash_kb}KB) for DoH -- proceeding, informed choice"
+		fi
+		if [ -n "$$mem_kb" ] && [ "$$mem_kb" -lt 65536 ] ; then
+			echo "plugin-gargoyle-doh: warning: this device's RAM (~$${mem_kb}KB) is below the ~64MB DoH is tested against." >&2
+			logger -t plugin-gargoyle-doh "low RAM (~$${mem_kb}KB) for DoH -- proceeding, informed choice"
+		fi
+
 		menu_name="DNS over HTTPS"
 		[ -n `which i18n` ] && {
 			mn=$$(i18n-menu gargoyle.display.connection_doh)
