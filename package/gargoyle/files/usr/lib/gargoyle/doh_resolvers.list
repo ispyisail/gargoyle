@@ -1,0 +1,55 @@
+# Curated list of public DoH/DNS-over-HTTPS resolver addresses, one per
+# line, consumed by block_doh_ips() in gargoyle_firewall_util.sh when
+# firewall.@defaults[0].block_doh_ips=1.
+#
+# This is deliberately a small, conservative subset of the 40+ providers in
+# plugin-gargoyle-doh's own provider list
+# (package/plugin-gargoyle-doh/files/usr/lib/https-dns-proxy/*.json).
+#
+# That directory's "bootstrap_dns" field is NOT reliably the provider's own
+# DoH service address -- it is the IP used to resolve the provider's *own*
+# hostname (e.g. several smaller/regional providers list Cloudflare's
+# 1.1.1.1 as their bootstrap purely to look up their own domain, not because
+# they run on 1.1.1.1 themselves). Treating every bootstrap_dns value as a
+# blockable resolver address would be wrong for those entries and risks
+# blackholing traffic unrelated to DoH.
+#
+# Only operators below are ones whose bootstrap_dns is verifiably their own
+# dedicated public-resolver anycast address (bootstrap == service, confirmed
+# against each provider's own JSON template/help_link, and matching Gargoyle's
+# own shipped https-dns-proxy default instances for Cloudflare/Google -- see
+# package/https-dns-proxy/files/etc/config/https-dns-proxy). Adding another
+# provider here requires the same verification, not just copying its
+# bootstrap_dns value.
+
+# Cloudflare (com.cloudflare-dns.json)
+1.1.1.1
+1.0.0.1
+2606:4700:4700::1111
+2606:4700:4700::1001
+
+# Google (google.dns.json)
+8.8.8.8
+8.8.4.4
+2001:4860:4860::8888
+2001:4860:4860::8844
+
+# Quad9 (net.quad9.json)
+9.9.9.9
+149.112.112.112
+2620:fe::fe
+2620:fe::9
+
+# OpenDNS / Cisco (com.opendns.doh.json)
+208.67.222.222
+208.67.220.220
+
+# AliDNS (com.alidns.dns.json)
+223.5.5.5
+223.6.6.6
+2400:3200::1
+2400:3200:baba::1
+
+# AdGuard (com.adguard.dns.json)
+176.103.130.130
+176.103.130.131

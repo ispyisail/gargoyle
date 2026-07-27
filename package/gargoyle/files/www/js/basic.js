@@ -715,6 +715,29 @@ function saveChanges()
 			var fdCommand = forceDNS == "1" ?  "\nuci set firewall.@defaults[0].force_router_dns=1 \n" : "\nuci -q del firewall.@defaults[0].force_router_dns \n";
 			preCommands = preCommands + fdCommand ;
 
+			//block client-side encrypted DNS bypass (DoT, known public DoH resolvers,
+			//DoH auto-detection canary domains, HTTPS/SVCB records) -- independent of
+			//force_router_dns/DoH plugin state, see block_dot()/block_doh_ips()/
+			//apply_dns_canary_and_filter() in gargoyle_firewall_util.sh
+			var dnsBypassOptions = [
+				["lan_dns_block_dot", "block_dot"],
+				["lan_dns_block_doh_ips", "block_doh_ips"],
+				["lan_dns_block_canary", "block_canary"],
+				["lan_dns_filter_https_rr", "filter_https_rr"]
+			];
+			for(var dbIndex=0; dbIndex < dnsBypassOptions.length; dbIndex++)
+			{
+				var dbElementId = dnsBypassOptions[dbIndex][0];
+				var dbOption    = dnsBypassOptions[dbIndex][1];
+				var dbValue     = document.getElementById(dbElementId).checked ? "1" : "";
+				uciOriginal.set("firewall", firewallDefaultSections[0], dbOption, dbValue);
+				uci.set("firewall", firewallDefaultSections[0], dbOption, dbValue);
+				var dbCommand = dbValue == "1" ?
+					"\nuci set firewall.@defaults[0]." + dbOption + "=1 \n" :
+					"\nuci -q del firewall.@defaults[0]." + dbOption + " \n";
+				preCommands = preCommands + dbCommand ;
+			}
+
 			//is ping drop from WAN side?
 			var pingSection = getPingSection();
 			var isPingDrop = document.getElementById("drop_wan_ping").checked ? "DROP" : "ACCEPT";
@@ -2506,6 +2529,10 @@ function resetData()
 
 	//initialize dns
 	document.getElementById("lan_dns_force").checked = (uciOriginal.get("firewall", firewallDefaultSections[0], "force_router_dns") == "1");
+	document.getElementById("lan_dns_block_dot").checked = (uciOriginal.get("firewall", firewallDefaultSections[0], "block_dot") == "1");
+	document.getElementById("lan_dns_block_doh_ips").checked = (uciOriginal.get("firewall", firewallDefaultSections[0], "block_doh_ips") == "1");
+	document.getElementById("lan_dns_block_canary").checked = (uciOriginal.get("firewall", firewallDefaultSections[0], "block_canary") == "1");
+	document.getElementById("lan_dns_filter_https_rr").checked = (uciOriginal.get("firewall", firewallDefaultSections[0], "filter_https_rr") == "1");
 	var dnsmasq_servers = uciOriginal.get("dhcp", uciOriginal.getAllSectionsOfType("dhcp", "dnsmasq").shift(), "server");
 	dnsmasq_servers = dnsmasq_servers == '' ? [] : dnsmasq_servers;
 	var doh_plugin_servers = uciOriginal.get("dhcp", uciOriginal.getAllSectionsOfType("dhcp", "dnsmasq").shift(), "doh_server");
