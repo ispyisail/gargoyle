@@ -54,6 +54,13 @@
 
 				<div class="row form-group">
 					<span class="col-xs-12">
+						<button id="doh_test_button" class="btn btn-default" onclick="testEncryptedDns()"><%~ doh.TestBtn %></button>
+						<span class="short-left-pad" id="doh_test_result"></span>
+					</span>
+				</div>
+
+				<div class="row form-group">
+					<span class="col-xs-12">
 						<input type="checkbox" id="doh_enable"/>
 						<label id="doh_enable_label" for="doh_enable"><%~ doh.Enable %> DNS over HTTPS (DoH) Proxy</label>
 					</span>

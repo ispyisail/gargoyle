@@ -748,6 +748,34 @@ var isb43 = wirelessDriver == "mac80211" && (!GwifiN) ? true : false ;
 								<label class="short-left-pad" for="lan_dns_force" id="lan_dns_force_label" style="vertical-align:middle"><%~ RtrDNS %></label>
 							</span>
 						</div>
+
+						<div class="row form-group">
+							<span class="col-xs-12">
+								<input type="checkbox" id="lan_dns_block_dot"/>
+								<label class="short-left-pad" for="lan_dns_block_dot" id="lan_dns_block_dot_label" style="vertical-align:middle"><%~ BlockDoT %></label>
+							</span>
+						</div>
+
+						<div class="row form-group">
+							<span class="col-xs-12">
+								<input type="checkbox" id="lan_dns_block_doh_ips"/>
+								<label class="short-left-pad" for="lan_dns_block_doh_ips" id="lan_dns_block_doh_ips_label" style="vertical-align:middle"><%~ BlockDoHIPs %></label>
+							</span>
+						</div>
+
+						<div class="row form-group">
+							<span class="col-xs-12">
+								<input type="checkbox" id="lan_dns_block_canary"/>
+								<label class="short-left-pad" for="lan_dns_block_canary" id="lan_dns_block_canary_label" style="vertical-align:middle"><%~ BlockCanary %></label>
+							</span>
+						</div>
+
+						<div class="row form-group">
+							<span class="col-xs-12">
+								<input type="checkbox" id="lan_dns_filter_https_rr"/>
+								<label class="short-left-pad" for="lan_dns_filter_https_rr" id="lan_dns_filter_https_rr_label" style="vertical-align:middle"><%~ FilterHttpsRR %></label>
+							</span>
+						</div>
 					</div>
 				</div>
 			</div>

@@ -15,6 +15,14 @@ DoH.Status="Status";
 DoH.Run="Running";
 DoH.NRun="Not Running";
 DoH.Ports="Ports";
+DoH.TestBtn="Test Encrypted DNS";
+DoH.Testing="Testing...";
+DoH.TestFailed="Test request failed";
+DoH.TestRespOk="Resolver responded";
+DoH.TestRespFail="Resolver did not respond";
+DoH.TestNoLeak="no plaintext DNS left the WAN";
+DoH.TestLeak="plaintext DNS packets left the WAN";
+DoH.TestUnavailable="WAN capture unavailable on this device";
 
 /* Values from json files */
 DoH.Filter="Filter";

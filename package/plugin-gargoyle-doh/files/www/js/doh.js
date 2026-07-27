@@ -83,6 +83,62 @@ function setStatusText()
 	setChildText('hdp_status', statusText, statusColour, true, null, document);
 }
 
+// Parses the key=value lines from utility/doh_test.sh into an object
+function parseDohTestResponse(responseText)
+{
+	var result = {};
+	responseText.split('\n').forEach(function(line) {
+		var eqIdx = line.indexOf('=');
+		if(eqIdx > 0)
+		{
+			result[line.substring(0, eqIdx)] = line.substring(eqIdx + 1);
+		}
+	});
+	return result;
+}
+
+function testEncryptedDns()
+{
+	setChildText('doh_test_result', DoH.Testing, '#666666', false, null, document);
+	byId('doh_test_button').disabled = true;
+
+	var param = getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
+
+	var stateChangeFunction = function(req)
+	{
+		if(req.readyState == 4)
+		{
+			byId('doh_test_button').disabled = false;
+
+			if(req.status != 200 || !req.responseText)
+			{
+				setChildText('doh_test_result', DoH.TestFailed, '#880000', true, null, document);
+				return;
+			}
+
+			var result = parseDohTestResponse(req.responseText);
+			var text = (result.probe_responded === '1' ? DoH.TestRespOk : DoH.TestRespFail) + '. ';
+			var colour = '#880000';
+			if(result.plaintext_53_on_wan === '0')
+			{
+				text = text + DoH.TestNoLeak;
+				colour = '#008800';
+			}
+			else if(result.plaintext_53_on_wan === 'unavailable')
+			{
+				text = text + DoH.TestUnavailable;
+				colour = '#886600';
+			}
+			else
+			{
+				text = text + DoH.TestLeak + ' (' + result.plaintext_53_on_wan + ')';
+			}
+			setChildText('doh_test_result', text, colour, true, null, document);
+		}
+	}
+	runAjax("POST", "utility/doh_test.sh", param, stateChangeFunction);
+}
+
 function resetData()
 {
 	uci = uciOriginal.clone();

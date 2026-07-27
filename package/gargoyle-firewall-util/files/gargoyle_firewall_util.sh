@@ -634,6 +634,116 @@ force_router_dns()
 	fi
 }
 
+# Blocks client-side DNS-over-TLS / DNS-over-QUIC (port 853) so a LAN device
+# can't set up its own encrypted resolver and bypass dnsmasq. Independent of
+# force_router_dns/DoH state -- this is about denying the bypass, not routing
+# plaintext 53 anywhere.
+block_dot()
+{
+	local block_dot
+	block_dot=$(uci get firewall.@defaults[0].block_dot 2> /dev/null)
+	delete_chain_from_table "inet" "fw4" "block_dot_chain"
+	if [ "$block_dot" = "1" ] ; then
+		nft add chain inet fw4 block_dot_chain
+		nft insert rule inet fw4 forward_lan jump block_dot_chain
+		# reject (not drop) TCP so clients fail fast and fall back to plaintext 53
+		# instead of hanging until their own connect timeout
+		nft add rule inet fw4 block_dot_chain tcp dport 853 reject
+		nft add rule inet fw4 block_dot_chain udp dport 853 drop
+	fi
+}
+
+# Blocks LAN clients from reaching known public DoH resolver IPs directly on
+# 443, so a browser's built-in DoH (Firefox/Chrome) can't bypass dnsmasq the
+# same way plain port-53 bypass is blocked by force_router_dns. Deliberately
+# scoped to a curated resolver-address set, never a blanket 443 block, so
+# ordinary HTTPS browsing is unaffected.
+block_doh_ips()
+{
+	local block_doh_ips resolver_list ip fam
+	block_doh_ips=$(uci get firewall.@defaults[0].block_doh_ips 2> /dev/null)
+	resolver_list="/usr/lib/gargoyle/doh_resolvers.list"
+
+	delete_chain_from_table "inet" "fw4" "block_doh_chain"
+	setexists="$(nft -a list ruleset | grep "set doh_resolver_ips")"
+	[ -n "$setexists" ] && nft delete set inet fw4 doh_resolver_ips
+	setexists="$(nft -a list ruleset | grep "set doh_resolver_ip6s")"
+	[ -n "$setexists" ] && nft delete set inet fw4 doh_resolver_ip6s
+
+	if [ "$block_doh_ips" = "1" ] && [ -e "$resolver_list" ] ; then
+		nft add set inet fw4 doh_resolver_ips \{ type ipv4_addr\; \}
+		nft add set inet fw4 doh_resolver_ip6s \{ type ipv6_addr\; \}
+
+		while read -r ip ; do
+			case "$ip" in
+				""|\#*) continue ;;
+			esac
+			fam=$(ip_family "$ip")
+			if [ "$fam" = "ipv6" ] ; then
+				nft add element inet fw4 doh_resolver_ip6s \{ "$ip" \} 2>/dev/null
+			elif [ "$fam" = "ipv4" ] ; then
+				nft add element inet fw4 doh_resolver_ips \{ "$ip" \} 2>/dev/null
+			fi
+		done < "$resolver_list"
+
+		nft add chain inet fw4 block_doh_chain
+		nft insert rule inet fw4 forward_lan jump block_doh_chain
+		nft add rule inet fw4 block_doh_chain ip daddr @doh_resolver_ips tcp dport 443 reject
+		nft add rule inet fw4 block_doh_chain ip daddr @doh_resolver_ips udp dport 443 drop
+		nft add rule inet fw4 block_doh_chain ip6 daddr @doh_resolver_ip6s tcp dport 443 reject
+		nft add rule inet fw4 block_doh_chain ip6 daddr @doh_resolver_ip6s udp dport 443 drop
+	fi
+}
+
+# NXDOMAINs the Mozilla/Apple DoH-detection canary domains and, optionally,
+# strips HTTPS/SVCB records (which is what a client needs to negotiate ECH)
+# -- regardless of whether the DoH proxy itself is enabled. Mirrors the
+# mechanism https-dns-proxy's own init script uses for its canary_domains_*
+# options (dnsmasq_doh_server(), package/https-dns-proxy/files/etc/init.d/
+# https-dns-proxy) but applies unconditionally so the defence doesn't depend
+# on DoH being turned on.
+apply_dns_canary_and_filter()
+{
+	local block_canary filter_https_rr canary_domains
+	block_canary=$(uci get firewall.@defaults[0].block_canary 2> /dev/null)
+	filter_https_rr=$(uci get firewall.@defaults[0].filter_https_rr 2> /dev/null)
+	canary_domains="use-application-dns.net mask.icloud.com mask-h2.icloud.com"
+
+	[ "$block_canary" = "1" ] || [ "$filter_https_rr" = "1" ] || return 0
+
+	apply_one_dnsmasq_instance()
+	{
+		local cfg="$1"
+		local domain existing
+
+		if [ "$block_canary" = "1" ] ; then
+			for domain in $canary_domains ; do
+				existing=$(uci -q get "dhcp.${cfg}.server")
+				case " $existing " in
+					*" /${domain}/ "*) ;;
+					*) uci add_list "dhcp.${cfg}.server=/${domain}/" ;;
+				esac
+			done
+		fi
+
+		if [ "$filter_https_rr" = "1" ] ; then
+			existing=$(uci -q get "dhcp.${cfg}.filter_rr")
+			case " $existing " in
+				*" 65 "*) ;;
+				*) uci add_list "dhcp.${cfg}.filter_rr=65" ;;
+			esac
+		fi
+	}
+
+	config_load "dhcp"
+	config_foreach apply_one_dnsmasq_instance "dnsmasq"
+
+	if [ -n "$(uci changes dhcp)" ] ; then
+		uci commit dhcp
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	fi
+}
+
 add_adsl_modem_routes()
 {
 	wan_proto=$(uci -q get network.wan.proto)
@@ -653,6 +763,9 @@ initialize_firewall()
 	create_l7marker_chain
 	enforce_dhcp_assignments
 	force_router_dns
+	block_dot
+	block_doh_ips
+	apply_dns_canary_and_filter
 	add_adsl_modem_routes
 	isolate_guest_networks
 }
