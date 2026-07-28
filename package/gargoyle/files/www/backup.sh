@@ -131,6 +131,62 @@
 		</div>
 	</div>
 </div>
+
+<h2 class="page-header"><%~ backup.DiagC %></h2>
+<div class="row">
+	<div class="col-lg-12">
+		<div class="alert alert-info"><%~ backup.DiagDesc %></div>
+	</div>
+
+	<div class="col-lg-12">
+		<div class="panel panel-default">
+			<div class="panel-heading">
+				<h3 class="panel-title"><%~ backup.DiagC %></h3>
+			</div>
+			<div id="diagnostic_report_section" class="panel-body">
+				<div class="row form-group">
+					<span class="col-xs-12 alert alert-warning"><%~ backup.DiagWarn %></span>
+				</div>
+				<div class="row form-group">
+					<label class="col-xs-5" for="diag_level"><%~ backup.DiagLevel %>:</label>
+					<div class="col-xs-7">
+						<select class="form-control" id="diag_level" onchange="setDiagLevelHint()">
+							<option value="standard"><%~ backup.DiagLevelStd %></option>
+							<option value="relaxed"><%~ backup.DiagLevelRlx %></option>
+						</select>
+					</div>
+				</div>
+				<div id="diag_level_hint" class="row"><span class="col-xs-12 help-block"><%~ backup.DiagLevelStdHint %></span></div>
+				<div class="row form-group">
+					<span class="col-xs-12"><button id="diag_generate_button" class="btn btn-primary btn-lg" onclick="generateDiagnosticReport()"><%~ backup.DiagGenBtn %></button></span>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="modal fade" tabindex="-1" role="dialog" id="diagnostic_report_modal" aria-hidden="true" aria-labelledby="diagnostic_report_modal_title">
+	<div class="modal-dialog modal-lg" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 id="diagnostic_report_modal_title" class="panel-title"><%~ backup.DiagC %></h3>
+			</div>
+			<div class="modal-body">
+				<div class="row form-group">
+					<span class="col-xs-12 alert alert-warning"><%~ backup.DiagWarn %></span>
+				</div>
+				<div class="row form-group">
+					<span class="col-xs-12" id="diag_report_size"></span>
+				</div>
+				<div class="row form-group">
+					<span class="col-xs-12"><textarea class="form-control" rows="25" id="diag_report_output" style="width:100%;font-family:monospace;" readonly></textarea></span>
+				</div>
+			</div>
+			<div class="modal-footer" id="diagnostic_report_modal_button_container">
+			</div>
+		</div>
+	</div>
+</div>
 <%
 	gargoyle_header_footer -f -s "system" -p "backup"
 %>

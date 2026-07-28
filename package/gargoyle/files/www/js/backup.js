@@ -236,3 +236,71 @@ function reloadPage()
 		}
 	}
 }
+
+/* --- Diagnostic Report ------------------------------------------------ */
+// Backend redaction policy (both tiers, and what's redacted regardless of
+// tier) lives entirely in generate_diagnostic_report.sh -- this is just the
+// UI for triggering it and showing the result. Never trust a client-side
+// display choice for anything the server didn't already redact; nothing
+// here un-redacts or filters what utility/diagnostic_report.sh returns.
+
+function setDiagLevelHint()
+{
+	var relaxed = getSelectedValue("diag_level") == "relaxed";
+	document.getElementById("diag_level_hint").firstElementChild.textContent = relaxed ? bkS.DiagLevelRlxHint : bkS.DiagLevelStdHint;
+}
+
+function generateDiagnosticReport()
+{
+	setControlsEnabled(false, true, bkS.DiagGenerating);
+	var level = getSelectedValue("diag_level");
+	var hash = document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, "");
+	var param = getParameterDefinition("level", level) + "&" + getParameterDefinition("hash", hash);
+
+	var stateChangeFunction = function(req)
+	{
+		if(req.readyState == 4)
+		{
+			setControlsEnabled(true);
+			var report = req.responseText.replace(/Success\n$/,"");
+			showDiagnosticReportModal(report, level);
+		}
+	}
+	runAjax("POST", "utility/diagnostic_report.sh", param, stateChangeFunction);
+}
+
+function showDiagnosticReportModal(report, level)
+{
+	document.getElementById("diag_report_output").value = report;
+
+	var lineCount = report.length == 0 ? 0 : report.split("\n").length;
+	document.getElementById("diag_report_size").textContent = bkS.DiagReportSize.replace(/%lines%/, lineCount);
+
+	var titleEl = document.getElementById("diagnostic_report_modal_title");
+	if(titleEl) { titleEl.innerHTML = bkS.DiagC; }
+
+	var btnContainer = document.getElementById("diagnostic_report_modal_button_container");
+	while(btnContainer.children.length > 0) { btnContainer.removeChild(btnContainer.children[0]); }
+
+	var downloadButton = document.createElement("button");
+	downloadButton.className = "btn btn-primary";
+	downloadButton.textContent = bkS.DiagDownloadBtn;
+	downloadButton.onclick = function(){ downloadDiagnosticReport(level); };
+	btnContainer.appendChild(downloadButton);
+
+	var closeButton = document.createElement("button");
+	closeButton.className = "btn btn-warning";
+	closeButton.textContent = UI.Cancel;
+	closeButton.onclick = function(){ closeModalWindow("diagnostic_report_modal"); };
+	btnContainer.appendChild(closeButton);
+
+	openModalWindow("diagnostic_report_modal");
+}
+
+function downloadDiagnosticReport(level)
+{
+	// Same redaction tier the dialog is already showing -- no separate
+	// "raw" download path exists, by design (see the plan this was built
+	// from: the download button must never bypass what the dialog shows).
+	window.location = "utility/diagnostic_report.sh?level=" + level;
+}

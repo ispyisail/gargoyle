@@ -23,6 +23,18 @@ bkS.ProfImpC="Import Settings Profile";
 bkS.ProfSelF="Select Profile File";
 bkS.ProfImpBtn="Import Profile";
 
+bkS.DiagC="Diagnostic Report for Forum Support";
+bkS.DiagDesc="Generates a copy of your router's state (config, firewall rules, WireGuard status, routes) for troubleshooting help on the forum or GitHub. Passwords, keys, and other sensitive fields are redacted automatically before you see it.";
+bkS.DiagWarn="This is meant for troubleshooting help, and may end up visible to anyone if you post it publicly. Known passwords, keys and other credentials are always redacted, but automated redaction cannot catch everything, especially anything outside a known list of fields (a custom rule comment, an unusual setting, etc). Review the report yourself before posting it anywhere public.";
+bkS.DiagLevel="Redaction Level";
+bkS.DiagLevelStd="Standard (for posting publicly)";
+bkS.DiagLevelRlx="Less redacted (for sharing privately with someone you trust)";
+bkS.DiagLevelStdHint="Maximum redaction. Recommended for posting on the public forum or GitHub.";
+bkS.DiagLevelRlxHint="Relaxes a few low-sensitivity fields (public keys, NTP servers, timezone, workgroup name). Passwords, keys, WiFi network name, and anything that could locate your router stay redacted either way.";
+bkS.DiagGenBtn="Generate Report";
+bkS.DiagDownloadBtn="Download as File";
+bkS.DiagReportSize="%lines% lines";
+
 //javascript
 bkS.SelCErr="ERROR: You must select a configuration file to restore from.";
 bkS.EraseWarn="This will completely erase your current settings and replace them with new ones from the selected configuration file. Are you sure you want to continue?";
@@ -36,6 +48,7 @@ bkS.RestPassErr="Restore failed: this backup is encrypted, and the passphrase wa
 bkS.ProfSelErr="ERROR: You must select a profile file to import.";
 bkS.ProfImpConfirm="This will apply the settings from the selected profile to this router, regenerating configuration for the current firmware. Continue?";
 bkS.ProfImping="Importing Settings Profile";
+bkS.DiagGenerating="Generating Diagnostic Report";
 bkS.ProfImpErr="Import failed. Ensure the uploaded file is a valid Gargoyle settings profile and try again.";
 bkS.ProfResult="Import complete: %applied% setting(s) applied, %review% need review.";
 bkS.ProfColFeat="Feature";
