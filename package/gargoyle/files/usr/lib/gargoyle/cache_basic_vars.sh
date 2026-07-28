@@ -64,9 +64,11 @@ print_mac80211_capabs_for_wifi_dev()
 			# the actual channel-line shape ("* <freq> MHz [<channel>]
 			# (<power> dBm)") instead, which no capability-description line
 			# happens to also start with.
+			# "no IR" is filtered alongside "disabled" -- see
+			# print_mac80211_channels_for_wifi_dev below for the full rationale.
 			iw "$phyname" info 2>&1 \
 				| grep -E '^[[:space:]]*\*[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+\[[0-9]+\]' \
-				| grep -v disabled \
+				| grep -vE 'disabled|no IR' \
 				| sed -e 's/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' \
 				| awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
 
@@ -194,9 +196,32 @@ print_mac80211_channels_for_wifi_dev()
 	# "(no IR)"/"(disabled)"/etc. Matching that shape directly is immune to
 	# whatever new capability-description text future standards add, since
 	# none of it will happen to also start with "* <number> MHz [<number>]".
+	# Channels flagged "no IR" are filtered out alongside "disabled" ones.
+	# "No IR" (no initiating radiation) means the radio may not transmit
+	# first on that channel, which is exactly what an AP has to do -- so
+	# hostapd cannot bring up an AP there and the radio silently never
+	# broadcasts, with no error surfaced anywhere in the GUI. Offering such
+	# a channel in the picker is offering a setting that cannot work.
+	#
+	# This bites hardest when no wireless country is configured: the
+	# regulatory domain stays "world" (00), and on a real MT7986 radio
+	# (GL-MT6000) that leaves only channels 36/40/44/48 usable on 5GHz --
+	# 52-144 come back "(no IR, radar detection)" and 149-165 "(no IR)",
+	# i.e. 21 of 25 channels unusable. Measured on real hardware, and it
+	# matches long-standing user reports of "5GHz doesn't broadcast at all"
+	# on this device going back to the 23.05 base.
+	#
+	# Note "no IR" is a property of the CURRENT regulatory domain, not of
+	# the hardware, so this filter is not permanent: setting the wireless
+	# country regenerates this cache (advanced.js triggers it on any
+	# wireless.radio*.country change), and DFS/UNII-3 channels legitimately
+	# reappear once the domain allows them.
+	#
+	# "no IR" cannot collide with the unrelated "IR-concurrent" flag, which
+	# does not contain the substring.
 	iw "$phyname" info 2>&1 \
 		| grep -E '^[[:space:]]*\*[[:space:]]*[0-9]+(\.[0-9]+)?[[:space:]]+MHz[[:space:]]+\[[0-9]+\]' \
-		| grep -v disabled \
+		| grep -vE 'disabled|no IR' \
 		| sed -e 's/[:blank:]*\*[:blank:]*//g; s:[]()[]::g; s/\.0//g; s/ dBm.*//g;' \
 		| awk ' { print "nextCh.push("$3"); nextChFreq["$3"] = \""$1"MHz\"; nextChPwr["$3"] = "$4";"   ; } ' >> "$out"
 
