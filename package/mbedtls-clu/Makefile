@@ -10,7 +10,7 @@ MAKE_PATH:=src
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=https://github.com/ispyisail/mbedtls-clu.git
-PKG_MIRROR_HASH:=8ec8a73f07af572deee04ca699ad862abcb723a9bd8de9afacf8d25edccabf95
+PKG_MIRROR_HASH:=011c19d84199e1c6eee33cdc09c69ce7e44ab06b69c6d337278a9e24bd6815da
 
 # Set to 1 to dynamically link libericstools, or 0 to static compile
 DLINK_LIBERICSTOOLS:=1
