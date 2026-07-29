@@ -53,6 +53,11 @@ if [ "$settings_not_preserved" == "1" ] ; then
 	/etc/init.d/miniupnpd disable       2>/dev/null
 	/etc/init.d/qos_gargoyle disable    2>/dev/null
 	/etc/init.d/webmon_gargoyle disable 2>/dev/null
+	# igmpproxy's own postinst enables it unconditionally; Gargoyle's
+	# Advanced-page toggle is opt-in (unchecked by default) and the stock
+	# init has no concept of that flag, so it must be disabled explicitly
+	# here or every install would silently run a multicast proxy no one asked for
+	/etc/init.d/igmpproxy disable        2>/dev/null
 
 fi
 

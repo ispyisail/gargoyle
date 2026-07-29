@@ -6,7 +6,7 @@
 	# itself remain covered by the GPL.
 	# See http://gargoyle-router.com/faq.html#qfoss for more information
 	eval $( gargoyle_session_validator -c "$COOKIE_hash" -e "$COOKIE_exp" -a "$HTTP_USER_AGENT" -i "$REMOTE_ADDR" -r "login.sh" -t $(uci get gargoyle.global.session_timeout) -b "$COOKIE_browser_time"  )
-	gargoyle_header_footer -h -s "connection" -p "advanced" -j "table.js advanced.js" -z "advanced.js basic.js" -i wireless usteer network
+	gargoyle_header_footer -h -s "connection" -p "advanced" -j "table.js advanced.js" -z "advanced.js basic.js" -i wireless usteer network igmpproxy
 %>
 <script>
 <!--
@@ -29,6 +29,31 @@
 	fi
 
 	echo "var num_cpus=$(grep -c processor /proc/cpuinfo);"
+
+	# IGMP proxy: availability + candidate interfaces (IPv4 only -- igmpproxy
+	# has no IPv6 support) + the firewall zone covering each, needed so saved
+	# phyint sections get the correct "zone" (igmpproxy's own auto-generated
+	# firewall rules are keyed off it).
+	if [ -x /etc/init.d/igmpproxy ] ; then
+		echo "var igmpAvailable=true;"
+	else
+		echo "var igmpAvailable=false;"
+	fi
+
+	echo "var igmpNetIfaces = new Array();"
+	for net in $(uci show network 2>/dev/null | sed -n "s/^network\.\([^.=]*\)=interface\$/\1/p") ; do
+		[ "$net" = "loopback" ] && continue
+		proto=$(uci -q get "network.$net.proto")
+		case "$proto" in
+			dhcpv6|*6) continue ;;
+		esac
+		zone=$(fw4 -q network "$net" 2>/dev/null)
+		up=$(ubus -S call "network.interface.$net" status 2>/dev/null | jsonfilter -q -e "@.up")
+		echo "igmpNetIfaces.push({name:'$net', zone:'$zone', up:'$up'});"
+	done
+
+	igmprunning=$(ubus call service list "{'name':'igmpproxy'}" 2>/dev/null | jsonfilter -q -e "@['igmpproxy'].instances[*].running" | uniq)
+	[ "$igmprunning" = "true" ] && echo "var igmpRunning=true;" || echo "var igmpRunning=false;"
 %>
 //-->
 </script>
@@ -113,6 +138,34 @@
 							<option value="2"><%~ Enabled (All CPUs) %></option>
 						</select>
 					</div>
+				</div>
+
+				<div id="igmp_container" class="row form-group" style="display:none">
+					<div class="col-xs-12"><h4><%~ IgmpTitle %></h4></div>
+
+					<span class="col-xs-12">
+						<input type="checkbox" id="igmp_enable"/>
+						<label id="igmp_enable_label" for="igmp_enable"><%~ IgmpEnable %></label>
+					</span>
+
+					<label class="col-xs-5" for="igmp_upstream"><%~ IgmpUpstream %>:</label>
+					<div class="col-xs-7">
+						<select class="form-control" id="igmp_upstream"></select>
+					</div>
+
+					<label class="col-xs-5" for="igmp_altnet"><%~ IgmpAltNet %>:</label>
+					<div class="col-xs-7">
+						<input type="text" class="form-control" id="igmp_altnet" value="0.0.0.0/0">
+						<em><%~ IgmpAltNetHelp %></em>
+					</div>
+
+					<div class="col-xs-12" id="igmp_downstream_label"><%~ IgmpDownstream %>:</div>
+					<div class="col-xs-12" id="igmp_downstream_container"></div>
+
+					<span class="col-xs-12">
+						<input type="checkbox" id="igmp_quickleave" checked/>
+						<label id="igmp_quickleave_label" for="igmp_quickleave"><%~ IgmpQuickLeave %></label>
+					</span>
 				</div>
 			</div>
 		</div>

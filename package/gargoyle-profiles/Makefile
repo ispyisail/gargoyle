@@ -14,7 +14,7 @@ GARGOYLE_PKGS_CORE:= +gargoyle +gargoyle-i18n +plugin-gargoyle-i18n-English-EN \
 		+ddns-gargoyle +plugin-gargoyle-ddns \
 		+plugin-gargoyle-wol \
 		+ewget +relayd +wpad-mbedtls \
-		+kmod-nf-nat6 +usteer
+		+kmod-nf-nat6 +usteer +igmpproxy
 
 GARGOYLE_PKGS_USB:= +plugin-gargoyle-usb-storage-extroot
 
