@@ -1,4 +1,5 @@
-GARGOYLE_VERSION:=1.15.X (Built $(shell echo "`date -u +%Y%m%d-%H%M` git@`git log -1 --pretty=format:%h`"))
+GARGOYLE_VERSION_SUFFIX?=
+GARGOYLE_VERSION:=1.15.X$(GARGOYLE_VERSION_SUFFIX) (Built $(shell echo "`date -u +%Y%m%d-%H%M` git@`git log -1 --pretty=format:%h`"))
 V=s
 FULL_BUILD=false
 CUSTOM_TEMPLATE=ath79
