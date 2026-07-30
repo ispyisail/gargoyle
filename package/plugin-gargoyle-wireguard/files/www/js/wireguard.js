@@ -1330,7 +1330,13 @@ function openRemoteAccessWizard()
 		return;
 	}
 
-	var serverEnabled = uciOriginal.get("wireguard_gargoyle", "server", "enabled");
+	// Deliberately uci, not uciOriginal: saveChanges() does NOT do
+	// uciOriginal=uci.clone() inline (it relies on a full page reload in
+	// production instead, 5s after the save completes), so uciOriginal can be
+	// stale within a session. Same fix as Guest Party Mode's own
+	// openGuestPartyWizard(); applied here too since this check has the
+	// identical failure mode.
+	var serverEnabled = uci.get("wireguard_gargoyle", "server", "enabled");
 	serverEnabled = serverEnabled == "1" || serverEnabled == "true";
 
 	if(serverEnabled)
@@ -1459,4 +1465,233 @@ function wizardDownloadConfig()
 	// duplicating its body, so the two never have a chance to drift.
 	var fakeRow = { childNodes: [null, { firstChild: { id: wizardClientId } }] };
 	downloadAc.call({ parentNode: { parentNode: fakeRow } });
+}
+
+// ---- Guest Party Mode ----
+//
+// Lets a user host a temporary, isolated WireGuard network for guests (a LAN
+// party): guests see each other and the router, never the real home LAN. See
+// docs/wizards/03-guest-network.md (gargoyle-tools repo) for the design
+// rationale, and 01-remote-access.md for the QR/download handoff pattern this
+// reuses (built there first; the QR-plugin runtime-detection check that
+// spec's own text still describes was superseded during that build by an
+// always-available-download design, applied identically here).
+//
+// wireguard_gargoyle has exactly one hardcoded server instance -- there is no
+// way to run an isolated guest network alongside normal road-warrior access
+// at the same time (that would need a genuinely second WireGuard interface,
+// explicitly out of scope for v1). This is a MODE: it flips the same two
+// server-wide settings the WireGuard page already exposes
+// (wireguard_server_subnet_access / wireguard_server_client_to_client) for
+// the duration of the party, and restores them exactly on "End Guest Party
+// Mode" -- it does not add a new isolation mechanism.
+//
+// Pre-party lan_access/c2c are captured into new wireguard_gargoyle.server
+// options (party_active, party_saved_lan_access, party_saved_c2c) rather than
+// anything in /tmp, so "End Guest Party Mode" still works after a reboot
+// mid-party.
+
+var guestPartyClientId = null;
+
+function openGuestPartyWizard()
+{
+	if(getSelectedValue("wireguard_config") == "client")
+	{
+		document.getElementById("wireguard_guest_party_blocked_message").innerText = wgStr.GPBlockedClient;
+		guestPartyShowPanel("blocked");
+		modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [], ["defaultDismiss"]);
+		openModalWindow('wireguard_guest_party_modal');
+		return;
+	}
+
+	// Deliberately uci, not uciOriginal: unlike the Restrictions page,
+	// wireguard.js's own saveChanges() does NOT do uciOriginal=uci.clone()
+	// inline (it relies on a full page reload in production instead, 5s
+	// after the save completes). Within that window, and in any test that
+	// exercises more than one openGuestPartyWizard() call per session,
+	// uciOriginal would still show pre-save state - checking uci is correct
+	// both immediately after a local change and on a fresh page load (uci
+	// starts as uciOriginal.clone() there too).
+	if(uci.get("wireguard_gargoyle", "server", "party_active") == "1")
+	{
+		guestPartyShowPanel("active_notice");
+		modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
+			[
+				{"title" : wgStr.GPAddAnother, "classes" : "btn btn-default", "function" : guestPartyAddAnother},
+				{"title" : wgStr.GPEnd, "classes" : "btn btn-warning", "function" : guestPartyEnd},
+				"defaultDismiss"
+			]);
+		openModalWindow('wireguard_guest_party_modal');
+		return;
+	}
+
+	var serverEnabled = uci.get("wireguard_gargoyle", "server", "enabled");
+	serverEnabled = serverEnabled == "1" || serverEnabled == "true";
+
+	if(!serverEnabled)
+	{
+		// Same guard as the Remote Access wizard: only touch server fields
+		// (keys included) when there is no existing server to disturb.
+		setSelectedValue("wireguard_config", "server");
+		setWireguardVisibility();
+		if(document.getElementById("wireguard_server_privkey").value == "")
+		{
+			generateKeyPair("server");
+		}
+	}
+
+	var existingClients = uci.getAllSectionsOfType("wireguard_gargoyle", "allowed_client")
+		.filter(function(id){ return uci.get("wireguard_gargoyle", id, "enabled") == "1"; });
+
+	var warningEl = document.getElementById("wireguard_guest_party_warning");
+	var countEl = document.getElementById("wireguard_guest_party_warning_count");
+	if(existingClients.length > 0)
+	{
+		warningEl.innerText = wgStr.GPWarning;
+		warningEl.style.display = "block";
+		countEl.innerText = wgStr.GPWarningCountPfx + existingClients.length + wgStr.GPWarningCountSfx;
+		countEl.style.display = "block";
+	}
+	else
+	{
+		warningEl.style.display = "none";
+		countEl.style.display = "none";
+	}
+
+	guestPartyShowPanel("confirm");
+	modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
+		[
+			{"title" : wgStr.GPStart, "classes" : "btn btn-primary", "function" : guestPartyStart},
+			"defaultDismiss"
+		]);
+	openModalWindow('wireguard_guest_party_modal');
+}
+
+function guestPartyShowPanel(name)
+{
+	["blocked", "confirm", "done", "active_notice", "ended"].forEach(function(panel)
+	{
+		document.getElementById("wireguard_guest_party_" + panel).style.display = panel == name ? "block" : "none";
+	});
+}
+
+function guestPartyStart()
+{
+	// Capture BEFORE flipping. resetData() already populated these selects
+	// from uciOriginal (or defaulted them, if the server was just enabled
+	// above), so this is the genuine pre-party state either way.
+	var savedLanAccess = getSelectedValue("wireguard_server_subnet_access");
+	var savedC2c = getSelectedValue("wireguard_server_client_to_client");
+	uci.set("wireguard_gargoyle", "server", "party_saved_lan_access", savedLanAccess);
+	uci.set("wireguard_gargoyle", "server", "party_saved_c2c", savedC2c);
+	uci.set("wireguard_gargoyle", "server", "party_active", "1");
+
+	// One plain-language choice, not two separately-worded dropdowns: guests
+	// can reach each other and the router (client-to-client on), never the
+	// real LAN (subnet access off).
+	document.getElementById("wireguard_server_subnet_access").value = "false";
+	document.getElementById("wireguard_server_client_to_client").value = "true";
+
+	closeModalWindow('wireguard_guest_party_modal');
+	guestPartyOpenAddClient();
+}
+
+function guestPartyOpenAddClient()
+{
+	// Reuses the real, unmodified add-client modal and its real addAc()
+	// commit function, exactly like the Remote Access wizard's own add-client
+	// step -- see wizardOpenAddClient's own comment for why the have_privkey
+	// fix below is needed.
+	addWgClientModal();
+	document.getElementById("wireguard_allowed_client_name").value = wgStr.GPDeviceDefaultName;
+	setSelectedValue("wireguard_allowed_client_have_privkey", "true", document);
+	setAllowedClientVisibility();
+	generateKeyPair("allowed_client");
+
+	var addBtn = document.querySelector("#wireguard_allowed_client_modal_button_container .btn-primary");
+	if(addBtn)
+	{
+		addBtn.onclick = guestPartyCommitClient;
+	}
+}
+
+function guestPartyCommitClient()
+{
+	addAc();
+
+	if(!document.getElementById("wireguard_allowed_client_modal").classList.contains("in"))
+	{
+		var tbody = document.getElementById("wireguard_allowed_client_table").tBodies[0];
+		var lastRow = tbody.rows[tbody.rows.length - 1];
+		guestPartyClientId = lastRow.childNodes[1].firstChild.id;
+
+		// saveChanges() must run before the config is built: server fields
+		// (ip, keys, ...) and this wizard's own party_active/party_saved_*
+		// options only land in uci's already-current values, but the FIREWALL
+		// side (lan_wg_forwarding absent, wg_zone.forward=ACCEPT) is only
+		// written inside saveChanges()'s own configureFirewall() closure, and
+		// downloadAc()'s AllowedIPs depends on the LAN/subnet math being
+		// correct regardless -- same reasoning as the Remote Access wizard's
+		// own saveChanges()-before-build ordering.
+		saveChanges();
+		guestPartyShowDone();
+	}
+}
+
+function guestPartyShowDone()
+{
+	document.getElementById("wireguard_guest_party_done_message").innerText = wgStr.GPDone;
+	guestPartyShowPanel("done");
+	modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
+		[
+			{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
+				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); }},
+		]);
+	openModalWindow('wireguard_guest_party_modal');
+}
+
+function guestPartyDownloadConfig()
+{
+	// Same fake-row calling convention as the Remote Access wizard's
+	// equivalent, so this never becomes a third generator of the config text.
+	var fakeRow = { childNodes: [null, { firstChild: { id: guestPartyClientId } }] };
+	downloadAc.call({ parentNode: { parentNode: fakeRow } });
+}
+
+function guestPartyAddAnother()
+{
+	closeModalWindow('wireguard_guest_party_modal');
+	guestPartyOpenAddClient();
+}
+
+function guestPartyEnd()
+{
+	// uci, not uciOriginal -- see the comment in openGuestPartyWizard(). The
+	// captured values were themselves written into uci by guestPartyStart(),
+	// so within the same session (before any reload) uciOriginal would show
+	// them as still absent.
+	var savedLanAccess = uci.get("wireguard_gargoyle", "server", "party_saved_lan_access");
+	var savedC2c = uci.get("wireguard_gargoyle", "server", "party_saved_c2c");
+	// Fall back to the shipped defaults only if somehow no captured value
+	// exists (e.g. party_active was set by hand outside the wizard) -- never
+	// silently leave the isolation flip in place.
+	savedLanAccess = savedLanAccess == "" ? "true" : savedLanAccess;
+	savedC2c = savedC2c == "" ? "false" : savedC2c;
+
+	document.getElementById("wireguard_server_subnet_access").value = savedLanAccess;
+	document.getElementById("wireguard_server_client_to_client").value = savedC2c;
+	uci.set("wireguard_gargoyle", "server", "party_active", "0");
+	uci.remove("wireguard_gargoyle", "server", "party_saved_lan_access");
+	uci.remove("wireguard_gargoyle", "server", "party_saved_c2c");
+
+	closeModalWindow('wireguard_guest_party_modal');
+	saveChanges();
+
+	guestPartyShowPanel("ended");
+	modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
+		[
+			{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
+				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); }},
+		]);
+	openModalWindow('wireguard_guest_party_modal');
 }
