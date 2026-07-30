@@ -29,6 +29,18 @@
 </script>
 
 <h1 class="page-header"><%~ restrictions.mRestrict %></h1>
+
+<div class="row">
+	<div id="restriction_wizard_callout" class="col-lg-6">
+		<div class="panel panel-info">
+			<div class="panel-body">
+				<p><%~ restrictions.FTWIntro %></p>
+				<button id="restriction_wizard_open" class="btn btn-primary" onclick="openFamilyTimeWizard()"><%~ restrictions.FTWBtn %></button>
+			</div>
+		</div>
+	</div>
+</div>
+
 <div class="row">
 	<div class="col-lg-6">
 		<div class="panel panel-default">
@@ -83,6 +95,55 @@
 <div id="bottom_button_container" class="panel panel-default">
 	<button id="save_button" class="btn btn-primary btn-lg" onclick="saveChanges()"><%~ SaveChanges %></button>
 	<button id="reset_button" class="btn btn-warning btn-lg" onclick="resetData()"><%~ Reset %></button>
+</div>
+
+<div class="modal fade" tabindex="-1" role="dialog" id="family_time_wizard_modal" aria-hidden="true" aria-labelledby="family_time_wizard_modal_title">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 id="family_time_wizard_modal_title" class="panel-title"><%~ restrictions.FTWTitle %></h3>
+			</div>
+			<div class="modal-body">
+				<div id="family_time_wizard_noGroups" style="display:none">
+					<p><%~ restrictions.FTWNoGroups %></p>
+				</div>
+
+				<div id="family_time_wizard_step1" style="display:none">
+					<p><%~ restrictions.FTWStep1Desc %></p>
+					<div id="family_time_wizard_group_list"></div>
+				</div>
+
+				<div id="family_time_wizard_step2" style="display:none">
+					<p><%~ restrictions.FTWStep2Desc %></p>
+					<div class="row form-group">
+						<label class="col-xs-3" for='family_time_wizard_from'><%~ restrictions.FTWFrom %>:</label>
+						<span class="col-xs-3"><input type='text' class="form-control" id='family_time_wizard_from' size='6' placeholder='21:00' /></span>
+						<label class="col-xs-3" for='family_time_wizard_to'><%~ restrictions.FTWTo %>:</label>
+						<span class="col-xs-3"><input type='text' class="form-control" id='family_time_wizard_to' size='6' placeholder='07:00' /></span>
+					</div>
+					<div class="row form-group">
+						<label class="col-xs-5"><%~ restrictions.FTWDays %>:</label>
+						<span class="col-xs-7">
+							<input type='checkbox' id='family_time_wizard_sun' checked /><label for="family_time_wizard_sun"><%~ Sun %></label>
+							<input type='checkbox' id='family_time_wizard_mon' checked /><label for="family_time_wizard_mon"><%~ Mon %></label>
+							<input type='checkbox' id='family_time_wizard_tue' checked /><label for="family_time_wizard_tue"><%~ Tue %></label>
+							<input type='checkbox' id='family_time_wizard_wed' checked /><label for="family_time_wizard_wed"><%~ Wed %></label>
+							<input type='checkbox' id='family_time_wizard_thu' checked /><label for="family_time_wizard_thu"><%~ Thu %></label>
+							<input type='checkbox' id='family_time_wizard_fri' checked /><label for="family_time_wizard_fri"><%~ Fri %></label>
+							<input type='checkbox' id='family_time_wizard_sat' checked /><label for="family_time_wizard_sat"><%~ Sat %></label>
+						</span>
+					</div>
+				</div>
+
+				<div id="family_time_wizard_done" style="display:none">
+					<p><%~ restrictions.FTWDone %></p>
+					<p><em><%~ restrictions.FTWOverrideHint %></em></p>
+				</div>
+			</div>
+			<div class="modal-footer" id="family_time_wizard_modal_button_container">
+			</div>
+		</div>
+	</div>
 </div>
 
 <div class="modal fade" tabindex="-1" role="dialog" id="restriction_rule_modal" aria-hidden="true" aria-labelledby="restriction_rule_modal_title">
