@@ -234,28 +234,14 @@ function addWireGuardQrCode(optgroup, name, iface, peer, enabled)
 	}
 }
 
-// Encode WireGuard client configuration. The DNS line is emitted only when a
-// resolver is supplied, so a caller that has none still produces a valid config.
+// Encode WireGuard client configuration. Delegates to the shared renderer in
+// core's wg_client_config.js (loaded via this page's -j list) so this and
+// plugin-gargoyle-wireguard's own client download never drift again. Kept as
+// its own function, with this signature, since addWireGuardQrCode:226 (and
+// potentially other callers) already depend on it.
 function encWireGuardQrCode(iface, peer)
 {
-	let lines = [
-		"[Interface]",
-		"Address = " + iface.address,
-	];
-	if(iface.dns)
-	{
-		lines.push("DNS = " + iface.dns);
-	}
-	lines = lines.concat([
-		"PrivateKey = " + iface.privateKey,
-		"",
-		"[Peer]",
-		"AllowedIPs = " + peer.allowedIPs,
-		"Endpoint = " + peer.endpoint,
-		"PersistentKeepalive = 25",
-		"PublicKey = " + peer.publicKey,
-	]);
-	return lines.join("\n");
+	return wgRenderClientConfig(iface, peer);
 }
 
 // Add option group and set QR code application and whether URL is remote.
