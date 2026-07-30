@@ -18,6 +18,18 @@
 </script>
 
 <h1 class="page-header"><%~ wireguard.wg %></h1>
+
+<div class="row">
+	<div id="wireguard_guest_party_callout" class="col-lg-6">
+		<div class="panel panel-info">
+			<div class="panel-body">
+				<p><%~ GPIntro %></p>
+				<button id="wireguard_guest_party_open" class="btn btn-primary" onclick="openGuestPartyWizard()"><%~ GPBtn %></button>
+			</div>
+		</div>
+	</div>
+</div>
+
 <div class="row">
 	<div id="wireguard_config_fieldset" class="col-lg-6">
 		<div class="panel panel-default">
@@ -258,6 +270,48 @@
 <div id="bottom_button_container" class="panel panel-default">
 	<button id="save_button" class="btn btn-primary btn-lg" onclick="saveChanges()"><%~ SaveChanges %></button>
 	<button id="reset_button" class="btn btn-warning btn-lg" onclick="resetData()"><%~ Reset %></button>
+</div>
+
+<div class="modal fade" tabindex="-1" role="dialog" id="wireguard_guest_party_modal" aria-hidden="true" aria-labelledby="wireguard_guest_party_modal_title">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 id="wireguard_guest_party_modal_title" class="panel-title"><%~ GPTitle %></h3>
+			</div>
+			<div class="modal-body">
+				<div id="wireguard_guest_party_blocked" style="display:none">
+					<p id="wireguard_guest_party_blocked_message"></p>
+				</div>
+
+				<div id="wireguard_guest_party_confirm" style="display:none">
+					<p id="wireguard_guest_party_warning" style="display:none"></p>
+					<p id="wireguard_guest_party_warning_count" style="display:none"></p>
+					<p><%~ GPScope %></p>
+				</div>
+
+				<div id="wireguard_guest_party_done" style="display:none">
+					<p id="wireguard_guest_party_done_message"></p>
+					<div class="row form-group">
+						<span class="col-xs-12">
+							<button id="wireguard_guest_party_download" class="btn btn-default" onclick="guestPartyDownloadConfig()"><%~ GPDownload %></button>
+							<button id="wireguard_guest_party_add_another" class="btn btn-default" onclick="guestPartyAddAnother()"><%~ GPAddAnother %></button>
+						</span>
+					</div>
+					<p><em><%~ GPQrHint %></em></p>
+				</div>
+
+				<div id="wireguard_guest_party_active_notice" style="display:none">
+					<p><%~ GPActiveNotice %></p>
+				</div>
+
+				<div id="wireguard_guest_party_ended" style="display:none">
+					<p><%~ GPEnded %></p>
+				</div>
+			</div>
+			<div class="modal-footer" id="wireguard_guest_party_modal_button_container">
+			</div>
+		</div>
+	</div>
 </div>
 
 <div class="modal fade" tabindex="-1" role="dialog" id="wireguard_allowed_client_modal" aria-hidden="true" aria-labelledby="wireguard_allowed_client_modal_title">

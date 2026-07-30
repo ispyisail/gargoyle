@@ -87,3 +87,22 @@ wgStr.seen="Last Seen";
 wgStr.ConnWgC="Connected Wireguard Clients";
 wgStr.NoCConn="No clients connected";
 
+wgStr.GPIntro="Host a temporary VPN network for guests (e.g. a LAN party): guests can see each other, but never your home network. Switch it off again when you're done.";
+wgStr.GPBtn="Guest Party Mode";
+wgStr.GPTitle="Guest Party Mode";
+wgStr.GPBlockedClient="This router is currently set up as a WireGuard client (connecting out to another router), not a server. Guest Party Mode is for hosting access to this router's own network. To change that, use the Wireguard Config section above.";
+wgStr.GPWarning="Guest Party Mode changes access for all current WireGuard users, including ones you've already set up: while it's on, nobody (including you) can reach your home network over WireGuard, only other guests and this router. It's meant to be switched off again afterward.";
+wgStr.GPWarningCountPfx="This will affect ";
+wgStr.GPWarningCountSfx=" device(s) already set up.";
+wgStr.GPScope="Guests can see each other and this router, not your home network.";
+wgStr.GPStart="Start Guest Party Mode";
+wgStr.GPDeviceDefaultName="Guest";
+wgStr.GPDone="Guest Party Mode is on. Give this device's config to your guest.";
+wgStr.GPDownload="Download Config File";
+wgStr.GPQrHint="Prefer a QR code? Open the QR Code page from the System menu (if installed on this router) and select this device.";
+wgStr.GPAddAnother="Add Another Guest";
+wgStr.GPActiveNotice="Guest Party Mode is currently on.";
+wgStr.GPEnd="End Guest Party Mode";
+wgStr.GPEnded="Guest Party Mode is off. Your normal WireGuard access is restored.";
+wgStr.GPDone2="Done";
+
