@@ -114,30 +114,11 @@ function updateEditor()
 		for(let id of wireGuardSections)
 		{
 			let name = uciOriginal.get(wireGuard, id, "name");
-			let serverIp = uci.get(wireGuard, "server", "ip");
-			let serverMask = uci.get(wireGuard, "server", "submask");
-			let iface = {
-				address: uciOriginal.get(wireGuard, id, "ip") + "/32",
-				// The router resolves LAN hostnames for the client. Its tunnel
-				// address is routed in both tunnel modes (see allowedIPs below).
-				dns: serverIp,
-				publicKey: uciOriginal.get(wireGuard, id, "public_key"),
-				privateKey: uciOriginal.get(wireGuard, id, "private_key"),
-			};
-			// Split-tunnel has to route the Wireguard subnet as well as the LAN,
-			// otherwise the client cannot reach the server's own tunnel address.
-			let splitAllowedIPs = [
-				ipToStr(parseIp(serverIp) & parseIp(serverMask)) + "/" + parseCidr(serverMask),
-				ipToStr(parseIp(currentLanIp) & parseIp(currentLanMask)) + "/" + parseCidr(currentLanMask),
-			].join(",");
-			let peer = {
-				allowedIPs: uci.get(wireGuard, "server", "all_client_traffic") == "false"
-					? splitAllowedIPs : "0.0.0.0/0",
-				endpoint: uci.get(wireGuard, id, "remote") + ":" + uci.get(wireGuard, "server", "port"),
-				publicKey: uciOriginal.get(wireGuard, "server", "public_key"),
-			};
+			// Shared with plugin-gargoyle-wireguard's own client download, so the
+			// two stop drifting the way they used to (see wg_client_config.js).
+			let built = wgBuildClientConfig(uci, id, currentLanIp, currentLanMask);
 			let enabled = uciOriginal.get(wireGuard, id, "enabled") == "1";
-			addWireGuardQrCode(client, name, iface, peer, enabled);
+			addWireGuardQrCode(client, name, built.iface, built.peer, enabled);
 		}
 	}
 
