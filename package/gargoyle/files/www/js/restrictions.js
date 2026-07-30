@@ -1266,3 +1266,163 @@ function editRestrictionModal(isRestriction, triggerEl)
 	modalPrepare(ruleType + '_modal', isRestriction ? restStr.ERSect : restStr.EESect, modalElements, modalButtons);
 	openModalWindow(ruleType + '_modal');
 }
+
+// ---- Family Time Controls Wizard ----
+//
+// A plain-language front end over the same restriction_rule schema the full
+// Add New Rule form writes -- see docs/wizards/02-family-time.md
+// (gargoyle-tools repo) for the design rationale.
+//
+// Deliberately NOT built by driving the general-purpose modal/setUciFromDocument
+// the way spec 01's wizard reused addAc(): that form has ~40 fields (IP tables,
+// ports, protocols, URL matching) the wizard's own scope (device/group +
+// schedule + always-full-block) never touches at all. Writing the section
+// directly via uci.set() is a small, narrow subset of that schema, not a
+// duplicate of the general form's much larger logic.
+//
+// The override/"give more time" control (createReenableCell) is NOT
+// reimplemented either: it's already attached automatically to every
+// restriction_rule row resetData() renders, so a rule created here gets it for
+// free the moment the real saveChanges() (also unmodified) re-renders the
+// table -- no separate wizard step needed for it.
+
+var familyTimeWizardSelectedGroups = [];
+
+function openFamilyTimeWizard()
+{
+	if(knownDeviceGroups.length === 0)
+	{
+		showFamilyTimeWizardPanel("noGroups");
+		modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [], ["defaultDismiss"]);
+		openModalWindow('family_time_wizard_modal');
+		return;
+	}
+
+	var listEl = document.getElementById("family_time_wizard_group_list");
+	while(listEl.firstChild) { listEl.removeChild(listEl.firstChild); }
+	var gi;
+	for(gi = 0; gi < knownDeviceGroups.length; gi++)
+	{
+		var group = knownDeviceGroups[gi];
+		var wrap = document.createElement("div");
+		var cb = createInput("checkbox");
+		cb.id = "family_time_wizard_group_" + gi;
+		cb.value = group;
+		var lbl = document.createElement("label");
+		lbl.setAttribute("for", cb.id);
+		lbl.textContent = " " + group;
+		wrap.appendChild(cb);
+		wrap.appendChild(lbl);
+		listEl.appendChild(wrap);
+	}
+
+	showFamilyTimeWizardPanel("step1");
+	modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [],
+		[
+			{"title" : restStr.FTWNext, "classes" : "btn btn-primary", "function" : familyTimeWizardStep1Next},
+			"defaultDismiss"
+		]);
+	openModalWindow('family_time_wizard_modal');
+}
+
+function showFamilyTimeWizardPanel(name)
+{
+	["noGroups", "step1", "step2", "done"].forEach(function(panel)
+	{
+		document.getElementById("family_time_wizard_" + panel).style.display = panel == name ? "block" : "none";
+	});
+}
+
+function familyTimeWizardStep1Next()
+{
+	var listEl = document.getElementById("family_time_wizard_group_list");
+	var checked = Array.prototype.slice.call(listEl.querySelectorAll("input[type=checkbox]")).filter(function(cb){ return cb.checked; });
+	if(checked.length === 0)
+	{
+		alert(restStr.FTWNoGroupSelected);
+		return;
+	}
+	familyTimeWizardSelectedGroups = checked.map(function(cb){ return cb.value; });
+
+	showFamilyTimeWizardPanel("step2");
+	modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [],
+		[
+			{"title" : restStr.FTWCreate, "classes" : "btn btn-primary", "function" : familyTimeWizardCreate},
+			"defaultDismiss"
+		]);
+}
+
+// "HH:MM" only (unlike validateHours, which also accepts a bare hour) -- the
+// wizard's two plain text fields are simple enough to ask for the full form.
+function familyTimeWizardValidTime(str)
+{
+	return /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(str);
+}
+
+// Builds the active_hours value for a from/to pair, splitting into two
+// comma-joined ranges when the range crosses midnight (e.g. 21:00 to 07:00),
+// since a single HH:MM-HH:MM range can't express that within one calendar
+// day. validateHours (common.js) accepts either shape.
+function familyTimeWizardHoursRange(fromStr, toStr)
+{
+	if(fromStr < toStr)
+	{
+		return fromStr + "-" + toStr;
+	}
+	return fromStr + "-23:59,00:00-" + toStr;
+}
+
+function familyTimeWizardCreate()
+{
+	var fromStr = document.getElementById("family_time_wizard_from").value;
+	var toStr = document.getElementById("family_time_wizard_to").value;
+	if(!familyTimeWizardValidTime(fromStr) || !familyTimeWizardValidTime(toStr) || fromStr == toStr)
+	{
+		alert(restStr.FTWBadTimes);
+		return;
+	}
+
+	var dayIds = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+	var checkedDays = dayIds.filter(function(d){ return document.getElementById("family_time_wizard_" + d).checked; });
+	if(checkedDays.length === 0)
+	{
+		alert(restStr.FTWNoDaySelected);
+		return;
+	}
+
+	var newIndex = 1;
+	var newId = "rule_" + newIndex;
+	while(uci.get(pkg, newId, "") != "")
+	{
+		newIndex++;
+		newId = "rule_" + newIndex;
+	}
+
+	uci.set(pkg, newId, "", "restriction_rule");
+	uci.set(pkg, newId, "is_ingress", "0");
+	uci.set(pkg, newId, "enabled", "1");
+	uci.set(pkg, newId, "family", "any");
+	uci.set(pkg, newId, "description", restStr.FTWTitle + ": " + familyTimeWizardSelectedGroups.join(", "));
+	// One rule targeting every selected group, not one rule per group:
+	// make_nftables_rules.c splits local_addr on commas and emits one @setname
+	// match per GROUP: token, so this is already the backend's own preferred
+	// shape, not a workaround.
+	uci.set(pkg, newId, "local_addr", familyTimeWizardSelectedGroups.map(function(g){ return "GROUP:" + g; }).join(","));
+	if(checkedDays.length < 7)
+	{
+		uci.set(pkg, newId, "active_weekdays", checkedDays.join(","));
+	}
+	uci.set(pkg, newId, "active_hours", familyTimeWizardHoursRange(fromStr, toStr));
+	// url_type, remote_port_type, local_port_type, transport_protocol,
+	// app_protocol_type are all deliberately left unset here: on this schema,
+	// unset reads back as "all" (see the all_access checkbox's own load-time
+	// derivation above), which is exactly "block everything" -- the whole of
+	// this wizard's v1 scope. There is no separate field to set for it.
+
+	showFamilyTimeWizardPanel("done");
+	modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [],
+		[
+			{"title" : UI.SaveChanges, "classes" : "btn btn-primary",
+				"function" : function(){ closeModalWindow('family_time_wizard_modal'); saveChanges(); }},
+		]);
+}

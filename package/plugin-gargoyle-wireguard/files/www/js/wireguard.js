@@ -1303,13 +1303,177 @@ function proofreadAll()
 	return errors;
 }
 
+// ---- Remote Access Setup Wizard ----
+//
+// Thin orchestration over the page's own existing, unmodified functions
+// (generateKeyPair, addWgClientModal/addAc, downloadAc, saveChanges) -- see
+// docs/wizards/01-remote-access.md (gargoyle-tools repo) for the design
+// rationale and the deviations from that spec's original sketch, both
+// documented there and in the comments below at the point each applies.
+//
+// wizardClientId holds the allowed_client section id created by step 2, once
+// known, so step 3 can build that specific client's config.
+var wizardClientId = null;
+
+function openRemoteAccessWizard()
+{
+	if(getSelectedValue("wireguard_config") == "client")
+	{
+		// This router is itself a road-warrior client elsewhere. Quick Setup is
+		// for hosting access (server mode); switching modes here would silently
+		// discard that existing client configuration, so refuse instead.
+		document.getElementById("wireguard_wizard_blocked_message").innerText = wgStr.wgWizBlockedClient;
+		showWizardPanel("blocked");
+		modalPrepare('wireguard_wizard_modal', wgStr.wgWizTitle, [],
+			["defaultDismiss"]);
+		openModalWindow('wireguard_wizard_modal');
+		return;
+	}
+
+	// Deliberately uci, not uciOriginal: saveChanges() does NOT do
+	// uciOriginal=uci.clone() inline (it relies on a full page reload in
+	// production instead, 5s after the save completes), so uciOriginal can be
+	// stale within a session. Same fix as Guest Party Mode's own
+	// openGuestPartyWizard(); applied here too since this check has the
+	// identical failure mode.
+	var serverEnabled = uci.get("wireguard_gargoyle", "server", "enabled");
+	serverEnabled = serverEnabled == "1" || serverEnabled == "true";
+
+	if(serverEnabled)
+	{
+		// Already set up. Don't re-key or touch existing settings -- go
+		// straight to adding a device, reusing whatever's already configured.
+		wizardOpenAddClient();
+		return;
+	}
+
+	setSelectedValue("wireguard_config", "server");
+	setWireguardVisibility();
+	if(document.getElementById("wireguard_server_privkey").value == "")
+	{
+		generateKeyPair("server");
+	}
+
+	showWizardPanel("step1");
+	modalPrepare('wireguard_wizard_modal', wgStr.wgWizTitle, [],
+		[
+			{"title" : wgStr.wgWizNext, "classes" : "btn btn-primary", "function" : wizardStep1Next},
+			"defaultDismiss"
+		]);
+	openModalWindow('wireguard_wizard_modal');
+}
+
+function showWizardPanel(name)
+{
+	["blocked", "step1", "step3"].forEach(function(panel)
+	{
+		document.getElementById("wireguard_wizard_" + panel).style.display = panel == name ? "block" : "none";
+	});
+}
+
+function wizardStep1Next()
+{
+	// The scope choice (LAN-only vs full-tunnel) is the server-wide
+	// all_client_traffic setting, same field the full WireGuard page exposes
+	// as "Clients Use Wireguard For". Setting it here now costs nothing either
+	// way: DNS is pushed to the client in both tunnel modes (see
+	// wg_client_config.js), so LAN-only no longer loses hostname resolution
+	// the way it used to.
+	document.getElementById("wireguard_server_redirect_gateway").value =
+		getSelectedValue("wireguard_wizard_scope");
+
+	closeModalWindow('wireguard_wizard_modal');
+	wizardOpenAddClient();
+}
+
+function wizardOpenAddClient()
+{
+	// Reuses the real, unmodified add-client modal and its real addAc()
+	// commit function -- this wizard step is not a second implementation of
+	// client creation, just a thinner entry into the existing one. Only the
+	// default name and automatic key generation are wizard-specific.
+	addWgClientModal();
+	document.getElementById("wireguard_allowed_client_name").value = wgStr.wgWizDeviceDefaultName;
+
+	// addWgClientModal's own prefill (setAcDocumentFromUci) sets have_privkey to
+	// "false" because no key exists yet at that point. generateKeyPair() only
+	// fills the text fields, so without this, setAcUciFromDocument (gated on
+	// have_privkey) would silently discard the key it just generated.
+	setSelectedValue("wireguard_allowed_client_have_privkey", "true", document);
+	setAllowedClientVisibility();
+	generateKeyPair("allowed_client");
+
+	// modalPrepare (called inside addWgClientModal) builds the Add button
+	// fresh each time from a literal {..., "function": addAc} entry, with no
+	// id to hook. It's the only .btn-primary in that modal's footer, so
+	// rebinding it after the fact reaches the same button without needing to
+	// change addWgClientModal itself.
+	var addBtn = document.querySelector("#wireguard_allowed_client_modal_button_container .btn-primary");
+	if(addBtn)
+	{
+		addBtn.onclick = wizardCommitClient;
+	}
+}
+
+function wizardCommitClient()
+{
+	addAc();
+
+	// addAc() validates, and on success commits the client into the live uci,
+	// appends its table row, and closes the modal; on failure it alerts and
+	// leaves the modal open for correction. The "in" class is exactly what
+	// closeModalWindow/openModalWindow toggle, so its absence here is the same
+	// success signal the rest of this file already relies on.
+	if(!document.getElementById("wireguard_allowed_client_modal").classList.contains("in"))
+	{
+		var tbody = document.getElementById("wireguard_allowed_client_table").tBodies[0];
+		var lastRow = tbody.rows[tbody.rows.length - 1];
+		wizardClientId = lastRow.childNodes[1].firstChild.id;
+
+		// saveChanges() must run before the config is built, not after: the
+		// server fieldset's fields (ip, keys, all_client_traffic, ...) only get
+		// written into uci inside saveChanges()'s own "server" branch. Before
+		// that runs, uci has the new client (addAc() writes it directly) but not
+		// the server, so a config built here first would come out with server ip
+		// and keys blank. saveChanges() sets uci synchronously before kicking off
+		// its own async persist, so uci is fully populated the moment it returns
+		// and step 3 can build from it immediately without waiting on that
+		// request. This also means the config shown is genuinely what's being
+		// saved, not a snapshot that could differ from it.
+		saveChanges();
+		wizardShowStep3();
+	}
+}
+
+function wizardShowStep3()
+{
+	showWizardPanel("step3");
+	modalPrepare('wireguard_wizard_modal', wgStr.wgWizTitle, [],
+		[
+			{"title" : wgStr.wgWizDone, "classes" : "btn btn-primary",
+				"function" : function(){ closeModalWindow('wireguard_wizard_modal'); }},
+		]);
+	openModalWindow('wireguard_wizard_modal');
+}
+
+function wizardDownloadConfig()
+{
+	// downloadAc() reads from the live uci, which by this point (after
+	// wizardCommitClient's saveChanges() call) reflects the same server+client
+	// state that was just persisted. Calling it through the same fake-row
+	// calling convention its real table-row click handler uses, rather than
+	// duplicating its body, so the two never have a chance to drift.
+	var fakeRow = { childNodes: [null, { firstChild: { id: wizardClientId } }] };
+	downloadAc.call({ parentNode: { parentNode: fakeRow } });
+}
+
 // ---- Guest Party Mode ----
 //
 // Lets a user host a temporary, isolated WireGuard network for guests (a LAN
 // party): guests see each other and the router, never the real home LAN. See
 // docs/wizards/03-guest-network.md (gargoyle-tools repo) for the design
 // rationale, and 01-remote-access.md for the QR/download handoff pattern this
-// reuses (built there first; the "typeof encWireGuardQrCode" check that
+// reuses (built there first; the QR-plugin runtime-detection check that
 // spec's own text still describes was superseded during that build by an
 // always-available-download design, applied identically here).
 //

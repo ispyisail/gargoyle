@@ -87,6 +87,21 @@ wgStr.seen="Last Seen";
 wgStr.ConnWgC="Connected Wireguard Clients";
 wgStr.NoCConn="No clients connected";
 
+wgStr.wgWizIntro="Set up remote access to your home network in a few steps, without needing to understand WireGuard yourself.";
+wgStr.wgWizBtn="Quick Setup: Remote Access";
+wgStr.wgWizTitle="Remote Access Setup";
+wgStr.wgWizBlockedClient="This router is currently set up as a WireGuard client (connecting out to another router), not a server. Quick Setup is for hosting remote access to this router's own network. To change that, use the Wireguard Config section above.";
+wgStr.wgWizStep1Desc="First, choose what a connected device should be able to reach.";
+wgStr.wgWizScope="When connected remotely, this device can access";
+wgStr.wgWizScopeLan="Just my home network (recommended)";
+wgStr.wgWizScopeAll="All of my internet traffic, routed through home";
+wgStr.wgWizNext="Next";
+wgStr.wgWizDeviceDefaultName="My Phone";
+wgStr.wgWizStep3Desc="Saved. Your device is ready to connect: download the config file below and import it into the WireGuard app.";
+wgStr.wgWizQrHint="Prefer a QR code? Open the QR Code page from the System menu (if installed on this router) and select this device.";
+wgStr.wgWizDownload="Download Config File";
+wgStr.wgWizDone="Done";
+
 wgStr.GPIntro="Host a temporary VPN network for guests (e.g. a LAN party): guests can see each other, but never your home network. Switch it off again when you're done.";
 wgStr.GPBtn="Guest Party Mode";
 wgStr.GPTitle="Guest Party Mode";
