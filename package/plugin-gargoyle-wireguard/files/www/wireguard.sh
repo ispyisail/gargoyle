@@ -18,6 +18,18 @@
 </script>
 
 <h1 class="page-header"><%~ wireguard.wg %></h1>
+
+<div class="row">
+	<div id="wireguard_wizard_callout" class="col-lg-6">
+		<div class="panel panel-info">
+			<div class="panel-body">
+				<p><%~ wgWizIntro %></p>
+				<button id="wireguard_wizard_open" class="btn btn-primary" onclick="openRemoteAccessWizard()"><%~ wgWizBtn %></button>
+			</div>
+		</div>
+	</div>
+</div>
+
 <div class="row">
 	<div id="wireguard_config_fieldset" class="col-lg-6">
 		<div class="panel panel-default">
@@ -258,6 +270,46 @@
 <div id="bottom_button_container" class="panel panel-default">
 	<button id="save_button" class="btn btn-primary btn-lg" onclick="saveChanges()"><%~ SaveChanges %></button>
 	<button id="reset_button" class="btn btn-warning btn-lg" onclick="resetData()"><%~ Reset %></button>
+</div>
+
+<div class="modal fade" tabindex="-1" role="dialog" id="wireguard_wizard_modal" aria-hidden="true" aria-labelledby="wireguard_wizard_modal_title">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 id="wireguard_wizard_modal_title" class="panel-title"><%~ wgWizTitle %></h3>
+			</div>
+			<div class="modal-body">
+				<div id="wireguard_wizard_blocked" style="display:none">
+					<p id="wireguard_wizard_blocked_message"></p>
+				</div>
+
+				<div id="wireguard_wizard_step1" style="display:none">
+					<p><%~ wgWizStep1Desc %></p>
+					<div class="row form-group">
+						<label class="col-xs-7" for='wireguard_wizard_scope' id='wireguard_wizard_scope_label'><%~ wgWizScope %>:</label>
+						<span class="col-xs-5">
+							<select class="form-control" id='wireguard_wizard_scope'>
+								<option value='false'><%~ wgWizScopeLan %></option>
+								<option value='true'><%~ wgWizScopeAll %></option>
+							</select>
+						</span>
+					</div>
+				</div>
+
+				<div id="wireguard_wizard_step3" style="display:none">
+					<p><%~ wgWizStep3Desc %></p>
+					<div class="row form-group">
+						<span class="col-xs-12">
+							<button id="wireguard_wizard_download" class="btn btn-default" onclick="wizardDownloadConfig()"><%~ wgWizDownload %></button>
+						</span>
+					</div>
+					<p><em><%~ wgWizQrHint %></em></p>
+				</div>
+			</div>
+			<div class="modal-footer" id="wireguard_wizard_modal_button_container">
+			</div>
+		</div>
+	</div>
 </div>
 
 <div class="modal fade" tabindex="-1" role="dialog" id="wireguard_allowed_client_modal" aria-hidden="true" aria-labelledby="wireguard_allowed_client_modal_title">
