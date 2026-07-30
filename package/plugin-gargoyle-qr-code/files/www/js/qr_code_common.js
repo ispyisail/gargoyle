@@ -234,12 +234,19 @@ function addWireGuardQrCode(optgroup, name, iface, peer, enabled)
 	}
 }
 
-// Encode WireGuard client configuration.
+// Encode WireGuard client configuration. The DNS line is emitted only when a
+// resolver is supplied, so a caller that has none still produces a valid config.
 function encWireGuardQrCode(iface, peer)
 {
-	return [
+	let lines = [
 		"[Interface]",
 		"Address = " + iface.address,
+	];
+	if(iface.dns)
+	{
+		lines.push("DNS = " + iface.dns);
+	}
+	lines = lines.concat([
 		"PrivateKey = " + iface.privateKey,
 		"",
 		"[Peer]",
@@ -247,7 +254,8 @@ function encWireGuardQrCode(iface, peer)
 		"Endpoint = " + peer.endpoint,
 		"PersistentKeepalive = 25",
 		"PublicKey = " + peer.publicKey,
-	].join("\n");
+	]);
+	return lines.join("\n");
 }
 
 // Add option group and set QR code application and whether URL is remote.

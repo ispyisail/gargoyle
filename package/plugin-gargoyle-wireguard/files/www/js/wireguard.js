@@ -551,10 +551,12 @@ function downloadAc()
 	var intprivkey = uci.get("wireguard_gargoyle",downloadId,"private_key");
 	commands.push("echo '[Interface]' >> /tmp/wg.ac.tmp.conf");
 	commands.push("echo 'Address = " + intaddr + "' >> /tmp/wg.ac.tmp.conf");
-	if(allClientTraffic == "true")
-	{
-		commands.push("echo 'DNS = " + wgServerIP + "' >> /tmp/wg.ac.tmp.conf");
-	}
+	// The server's tunnel address sits inside the Wireguard subnet, which the
+	// AllowedIPs block below routes in split-tunnel mode as well as full-tunnel,
+	// so the client can always reach it as a resolver. Only pushing this for
+	// full-tunnel was correct when split-tunnel AllowedIPs carried the LAN
+	// subnet alone, but it left clients unable to resolve LAN hostnames.
+	commands.push("echo 'DNS = " + wgServerIP + "' >> /tmp/wg.ac.tmp.conf");
 	commands.push("echo 'PrivateKey = " + intprivkey + "' >> /tmp/wg.ac.tmp.conf");
 
 	// Create Peer Section
