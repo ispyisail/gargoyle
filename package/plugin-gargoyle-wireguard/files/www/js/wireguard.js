@@ -136,8 +136,22 @@ function resetData()
 // overlap a second run_commands.sh call the button's own click makes, both
 // serialized behind the same server-side lock -- confirmed live to
 // occasionally produce a 0-byte config download when they landed close
-// together. Every other caller passes nothing, which is unaffected.
-function saveChanges(onComplete)
+// together.
+//
+// deferReload (optional) skips scheduling the automatic reload below.
+// Normally that reload is exactly what a plain Save button wants (show
+// "please wait", reload 5s later, done) -- but it fires on a FIXED TIMER
+// regardless of what the user is doing, and the wizards below keep the
+// modal open afterward with real actionable buttons (Download, Add
+// Another) of their own. Confirmed live: even after fixing the button's
+// own click-blocking overlay, a user who takes more than ~5s to click
+// Download gets the whole modal wiped out from under them by this timer
+// mid-interaction, with no way to recover the download. Wizard callers
+// pass true here and take over the reload themselves -- once the user
+// actually finishes (clicks Done), not on an arbitrary clock.
+//
+// Every other caller passes neither argument and is unaffected.
+function saveChanges(onComplete, deferReload)
 {
 	var errorList = proofreadAll();
 	if(errorList.length > 0)
@@ -387,12 +401,15 @@ function saveChanges(onComplete)
 				{
 					onComplete();
 				}
-				setTimeout(function () {
-					//Give wireguard 5 seconds to come up.
-					//It is much quicker than this, but it helps the status flow
-					//through to the user in a more expected way if we wait
-					window.location=window.location;
-				}, 5000);
+				if(!deferReload)
+				{
+					setTimeout(function () {
+						//Give wireguard 5 seconds to come up.
+						//It is much quicker than this, but it helps the status flow
+						//through to the user in a more expected way if we wait
+						window.location=window.location;
+					}, 5000);
+				}
 			}
 		}
 		runAjax("POST", "utility/run_commands.sh", param, stateChangeFunction);
@@ -1458,7 +1475,7 @@ function wizardCommitClient()
 		// becomes clickable -- see wizardShowStep3()'s own comment) once that
 		// commit has actually landed, not while it's still racing the
 		// download's own separate backend request.
-		saveChanges(wizardShowStep3);
+		saveChanges(wizardShowStep3, true);
 	}
 }
 
@@ -1482,7 +1499,7 @@ function wizardShowStep3()
 	modalPrepare('wireguard_wizard_modal', wgStr.wgWizTitle, [],
 		[
 			{"title" : wgStr.wgWizDone, "classes" : "btn btn-primary",
-				"function" : function(){ closeModalWindow('wireguard_wizard_modal'); }},
+				"function" : function(){ closeModalWindow('wireguard_wizard_modal'); window.location=window.location; }},
 		]);
 	openModalWindow('wireguard_wizard_modal');
 }
@@ -1668,7 +1685,7 @@ function guestPartyCommitClient()
 		// same reason wizardShowStep3() is: showing its Download button before
 		// the backend commit actually lands can race that button's own click
 		// against saveChanges()'s still-in-flight persist.
-		saveChanges(guestPartyShowDone);
+		saveChanges(guestPartyShowDone, true);
 	}
 }
 
@@ -1687,7 +1704,7 @@ function guestPartyShowDone()
 	modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
 		[
 			{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
-				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); }},
+				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); window.location=window.location; }},
 		]);
 	openModalWindow('wireguard_guest_party_modal');
 }
@@ -1732,12 +1749,16 @@ function guestPartyEnd()
 	// actually restores it has landed, not just been kicked off.
 	saveChanges(function()
 	{
+		// Same as wizardShowStep3()/guestPartyShowDone(): clear the wait
+		// overlay ourselves now that the backend commit has landed, rather
+		// than leave it blocking this panel's own Done button.
+		setControlsEnabled(true);
 		guestPartyShowPanel("ended");
 		modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
 			[
 				{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
-					"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); }},
+					"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); window.location=window.location; }},
 			]);
 		openModalWindow('wireguard_guest_party_modal');
-	});
+	}, true);
 }
