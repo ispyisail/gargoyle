@@ -24,12 +24,20 @@ function resetData()
 	setModemNetworkVisibility();
 	// NetworkOpts
 	setPktSteeringVisibility();
+	setIgmpVisibility();
 
 	setGlobalVisibility();
 }
 
 function saveChanges()
 {
+	var igmpErrors = proofreadIgmp();
+	if(igmpErrors.length > 0)
+	{
+		alert(igmpErrors.join("\n") + "\n\n" + UI.ErrChanges);
+		return;
+	}
+
 	var uci = uciOriginal.clone();
 	var uciCompare = uciOriginal.clone();
 
@@ -86,6 +94,51 @@ function saveChanges()
 		uci.set('network', 'globals', 'packet_steering', selPktSteerOpt);
 	}
 
+	// IGMP Proxy
+	var igmpWasEnabled = false;
+	if(igmpAvailable)
+	{
+		var igmpSecs = uci.getAllSectionsOfType('igmpproxy','igmpproxy');
+		var igmpSec = igmpSecs.length > 0 ? igmpSecs[0] : '';
+		var igmpNowEnabled = byId('igmp_enable').checked;
+		igmpWasEnabled = igmpNowEnabled;
+
+		uci.set('igmpproxy', igmpSec, 'enabled', igmpNowEnabled ? '1' : '0');
+		uci.set('igmpproxy', igmpSec, 'quickleave', byId('igmp_quickleave').checked ? '1' : '0');
+
+		// wholesale rewrite of phyint sections, same approach doh.js uses for
+		// its resolver list -- simpler and safer than diffing in place
+		var existingPhyints = uci.getAllSectionsOfType('igmpproxy','phyint');
+		existingPhyints.forEach(function(sec) { uci.removeSection('igmpproxy', sec); });
+
+		if(igmpNowEnabled)
+		{
+			var upstreamName = getSelectedValue('igmp_upstream');
+			var upstreamZone = '';
+			igmpNetIfaces.forEach(function(iface) { if(iface.name == upstreamName) { upstreamZone = iface.zone; } });
+
+			uci.set('igmpproxy', 'igmp_up', '', 'phyint');
+			uci.set('igmpproxy', 'igmp_up', 'network', upstreamName);
+			uci.set('igmpproxy', 'igmp_up', 'zone', upstreamZone);
+			uci.set('igmpproxy', 'igmp_up', 'direction', 'upstream');
+			var altnetVals = byId('igmp_altnet').value.split(/\s+/).filter(function(s){return s != '';});
+			uci.createListOption('igmpproxy', 'igmp_up', 'altnet', true);
+			uci.set('igmpproxy', 'igmp_up', 'altnet', altnetVals);
+
+			igmpNetIfaces.forEach(function(iface) {
+				var cb = byId('igmp_down_' + iface.name);
+				if(cb && cb.checked && iface.name != upstreamName)
+				{
+					var downId = 'igmp_down_' + iface.name;
+					uci.set('igmpproxy', downId, '', 'phyint');
+					uci.set('igmpproxy', downId, 'network', iface.name);
+					uci.set('igmpproxy', downId, 'zone', iface.zone);
+					uci.set('igmpproxy', downId, 'direction', 'downstream');
+				}
+			});
+		}
+	}
+
 	var restartNetworkCommand = "\nsh /usr/lib/gargoyle/restart_network.sh;\n";
 	var regenerateCacheCommand = "\nrm -rf /tmp/cached_basic_vars ;\n/usr/lib/gargoyle/cache_basic_vars.sh >/dev/null 2>/dev/null\n";
 	var commands = uci.getScriptCommands(uciCompare);
@@ -111,6 +164,18 @@ function saveChanges()
 	{
 		// Packet steering option is being changed
 		shouldRestartNetwork = true;
+	}
+	if(commands.match(/igmpproxy/))
+	{
+		// IGMP Proxy settings are changing
+		if(igmpWasEnabled)
+		{
+			postcommands = postcommands + "/etc/init.d/igmpproxy enable\n/etc/init.d/igmpproxy restart\n";
+		}
+		else
+		{
+			postcommands = postcommands + "/etc/init.d/igmpproxy stop\n/etc/init.d/igmpproxy disable\n";
+		}
 	}
 
 	commands = commands + (shouldRestartNetwork ? restartNetworkCommand : '\n') + (shouldRegenCachedVars ? regenerateCacheCommand : '\n') + postcommands;
@@ -238,18 +303,127 @@ function setNetOptContainerVisibility()
 	var retVal = 0;
 	var vis = 'none';
 
-	if(num_cpus > 1)
+	if(num_cpus > 1 || igmpAvailable)
 	{
 		retVal = 1;
 		vis = 'block';
 	}
 	byId('netopt_container').style.display = vis;
+
+	// sub-blocks are independently gated now that the panel can be shown for
+	// either reason
+	byId('pktsteer_opt_container').style.display = (num_cpus > 1) ? 'block' : 'none';
+	byId('igmp_container').style.display = igmpAvailable ? 'block' : 'none';
+
 	return retVal;
 }
 
 function setPktSteeringVisibility()
 {
 	loadSelectedValueFromVariable(['pktsteer_opt',uciOriginal,'network','globals','packet_steering','1']);
+}
+
+function setIgmpVisibility()
+{
+	if(!igmpAvailable) { return; }
+
+	var igmpSecs = uciOriginal.getAllSectionsOfType('igmpproxy','igmpproxy');
+	var igmpSec = igmpSecs.length > 0 ? igmpSecs[0] : '';
+	byId('igmp_enable').checked = uciOriginal.get('igmpproxy', igmpSec, 'enabled') == '1';
+	byId('igmp_quickleave').checked = uciOriginal.get('igmpproxy', igmpSec, 'quickleave') != '0';
+
+	var phyints = uciOriginal.getAllSectionsOfType('igmpproxy','phyint');
+	var curUpstream = '';
+	var curDownstream = [];
+	phyints.forEach(function(sec) {
+		var dir = uciOriginal.get('igmpproxy', sec, 'direction');
+		var net = uciOriginal.get('igmpproxy', sec, 'network');
+		if(dir == 'upstream') { curUpstream = net; }
+		else if(dir == 'downstream') { curDownstream.push(net); }
+	});
+
+	var upVals = igmpNetIfaces.map(function(i){return i.name;});
+	var upNames = igmpNetIfaces.map(function(i){return i.name;});
+	setAllowableSelections('igmp_upstream', upVals, upNames);
+	setSelectedValue('igmp_upstream', curUpstream != '' ? curUpstream : (upVals.length > 0 ? upVals[0] : ''));
+
+	// altnet is a real uci list option; uciOriginal.get() returns it as a JS
+	// array directly for list-typed keys (same mechanism WireGuard's
+	// allowed_ips relies on) -- joined with spaces for the text field.
+	var upstreamSec = phyints.filter(function(s){return uciOriginal.get('igmpproxy',s,'direction')=='upstream';})[0];
+	var altnets = upstreamSec ? uciOriginal.get('igmpproxy', upstreamSec, 'altnet') : '';
+	byId('igmp_altnet').value = (altnets instanceof Array && altnets.length > 0) ? altnets.join(' ') : '0.0.0.0/0';
+
+	// downstream checkboxes, one per candidate interface
+	var container = byId('igmp_downstream_container');
+	while(container.firstChild) { container.removeChild(container.firstChild); }
+	igmpNetIfaces.forEach(function(iface) {
+		var wrap = document.createElement('span');
+		wrap.className = 'col-xs-4';
+		var cb = document.createElement('input');
+		cb.type = 'checkbox';
+		cb.id = 'igmp_down_' + iface.name;
+		cb.checked = curDownstream.indexOf(iface.name) > -1;
+		var lbl = document.createElement('label');
+		lbl.setAttribute('for', cb.id);
+		lbl.className = 'short-left-pad';
+		lbl.innerText = iface.name;
+		wrap.appendChild(cb);
+		wrap.appendChild(lbl);
+		container.appendChild(wrap);
+	});
+}
+
+function validateIgmpAltnet(cidr)
+{
+	// A dedicated check rather than reusing validateIP(): validateIP()
+	// treats 0.0.0.0 as an error (reserved/invalid host address), but
+	// 0.0.0.0/0 -- meaning "any source" -- is the recommended default value
+	// for this field and a completely valid CIDR network address.
+	var m = cidr.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/);
+	if(m == null) { return false; }
+	for(var i = 1; i <= 4; i++)
+	{
+		if(parseInt(m[i], 10) > 255) { return false; }
+	}
+	var prefix = parseInt(m[5], 10);
+	return prefix >= 0 && prefix <= 32;
+}
+
+function proofreadIgmp()
+{
+	var errors = [];
+	if(!igmpAvailable || !byId('igmp_enable').checked)
+	{
+		return errors;
+	}
+
+	var upstreamName = getSelectedValue('igmp_upstream');
+	if(upstreamName == '')
+	{
+		errors.push(advancedStr.IgmpErrNoUp);
+	}
+
+	var downstreamChecked = igmpNetIfaces.filter(function(iface) {
+		var cb = byId('igmp_down_' + iface.name);
+		return cb && cb.checked;
+	});
+	if(downstreamChecked.length == 0)
+	{
+		errors.push(advancedStr.IgmpErrNoDown);
+	}
+	else if(downstreamChecked.some(function(iface){return iface.name == upstreamName;}))
+	{
+		errors.push(advancedStr.IgmpErrSameIf);
+	}
+
+	var altnetVals = byId('igmp_altnet').value.split(/\s+/).filter(function(s){return s != '';});
+	if(altnetVals.length == 0 || altnetVals.some(function(s){return !validateIgmpAltnet(s);}))
+	{
+		errors.push(advancedStr.IgmpErrAltNet);
+	}
+
+	return errors;
 }
 
 function parseCountry(countryLines)

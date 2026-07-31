@@ -16,3 +16,15 @@ advancedStr.ModemIP="(IP must be in modem subnet)";
 // Network options
 advancedStr.NetOptTitle="Global network options";
 advancedStr.PktSteer="Activate packet steering?";
+// IGMP Proxy
+advancedStr.IgmpTitle="IGMP Proxy (Multicast / IPTV)";
+advancedStr.IgmpEnable="Enable IGMP Proxy";
+advancedStr.IgmpUpstream="Upstream Interface";
+advancedStr.IgmpDownstream="Downstream Interfaces";
+advancedStr.IgmpAltNet="Upstream Source Subnets";
+advancedStr.IgmpAltNetHelp="Subnets the multicast source may come from. Most ISP IPTV needs 0.0.0.0/0.";
+advancedStr.IgmpQuickLeave="Fast leave (reduces channel-change latency)";
+advancedStr.IgmpErrNoUp="IGMP Proxy: select an upstream interface.";
+advancedStr.IgmpErrNoDown="IGMP Proxy: select at least one downstream interface.";
+advancedStr.IgmpErrSameIf="IGMP Proxy: an interface cannot be both upstream and downstream.";
+advancedStr.IgmpErrAltNet="IGMP Proxy: invalid subnet in the upstream source subnets field.";
