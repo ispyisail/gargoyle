@@ -51,6 +51,7 @@ define Package/plugin-gargoyle-openvpn/install
 	$(INSTALL_DIR) $(1)/usr/lib/gargoyle
 	$(INSTALL_DIR) $(1)/usr/lib/bwmon-gargoyle/bwmon-gargoyle.d/
 	$(INSTALL_DIR) $(1)/www
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(CP) ./files/etc/config/* $(1)/etc/config/
 	$(CP) ./files/etc/hotplug.d/* $(1)/etc/hotplug.d/
 	$(CP) ./files/etc/uci-defaults/* $(1)/etc/uci-defaults/
@@ -60,6 +61,7 @@ define Package/plugin-gargoyle-openvpn/install
 	$(CP) ./files/www/* $(1)/www/
 	$(CP) ./files/usr/lib/gargoyle/* $(1)/usr/lib/gargoyle/
 	$(INSTALL_BIN) ./files/usr/lib/bwmon-gargoyle/bwmon-gargoyle.d/040-openvpn.bwmon $(1)/usr/lib/bwmon-gargoyle/bwmon-gargoyle.d/040-openvpn.bwmon
+	$(INSTALL_DATA) ./files/lib/upgrade/keep.d/gargoyle-openvpn $(1)/lib/upgrade/keep.d/gargoyle-openvpn
 endef
 
 
