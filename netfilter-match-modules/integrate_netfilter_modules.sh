@@ -16,7 +16,14 @@ insert_lines_at()
 	remainder=$(($file_length - $insert_after))
 		
 	head -n $insert_after $file >.tmp.tmp
-	printf "$lines\n" >>.tmp.tmp
+	# Snippet files double up literal '%' as '%%' (needed in nft_print/sprintf format
+	# strings, bison %token directives, flex %s start conditions) so it survives this
+	# insertion step as a single '%'. Do that collapse explicitly with sed rather than
+	# by handing $lines to printf as a FORMAT string -- shells disagree on how printf
+	# handles the unrelated "\"" in $lines (bash's builtin drops the backslash, dash's
+	# doesn't), which silently corrupted the emitted C on any system where /bin/sh is
+	# bash (e.g. Arch) even though genuine %-escapes were handled correctly everywhere.
+	printf '%s\n' "$lines" | sed 's/%%/%/g' >>.tmp.tmp
 	if [ $remainder -gt 0 ] ; then
 		tail -n $remainder $file >>.tmp.tmp
 	fi
@@ -123,7 +130,7 @@ if [ "$patch_kernel" = 1 ] ; then
 	board_var=$(cat target/linux/$target_name/Makefile | grep "BOARD.*:=")
 	kernel_var=$(cat target/linux/$target_name/Makefile | grep "KERNEL.*:=")
 	linux_ver_var=$(cat target/linux/$target_name/Makefile | grep "LINUX_VERSION.*:=") 
-	defines=$(printf "$board_var\n$kernel_var\n$linux_ver_var\n")
+	defines=$(printf '%s\n%s\n%s\n' "$board_var" "$kernel_var" "$linux_ver_var")
 
 	cat << 'EOF' >nf-patch-build/linux-download-make
 CP:=cp -fpR
@@ -140,7 +147,7 @@ DOWNLOAD_CHECK_CERTIFICATE:=$(CONFIG_DOWNLOAD_CHECK_CERTIFICATE)
 export DOWNLOAD_CHECK_CERTIFICATE
 EOF
 
-	printf "$defines\n" >> nf-patch-build/linux-download-make
+	printf '%s\n' "$defines" >> nf-patch-build/linux-download-make
 
 	cat << 'EOF' >>nf-patch-build/linux-download-make
 GENERIC_PLATFORM_DIR := $(TOPDIR)/target/linux/generic
