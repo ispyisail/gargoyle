@@ -127,7 +127,31 @@ function resetData()
 	setWireguardVisibility()
 }
 
-function saveChanges()
+// onComplete (optional) fires once the backend has actually committed the
+// save -- not before. The wizards below need this: they show a real,
+// actionable Download button right after calling this, and the local uci
+// this function edits is updated synchronously, but the PERSIST is a
+// separate async request. Rendering that button as soon as this function
+// merely returns (as opposed to once its own request finishes) let it
+// overlap a second run_commands.sh call the button's own click makes, both
+// serialized behind the same server-side lock -- confirmed live to
+// occasionally produce a 0-byte config download when they landed close
+// together.
+//
+// deferReload (optional) skips scheduling the automatic reload below.
+// Normally that reload is exactly what a plain Save button wants (show
+// "please wait", reload 5s later, done) -- but it fires on a FIXED TIMER
+// regardless of what the user is doing, and the wizards below keep the
+// modal open afterward with real actionable buttons (Download, Add
+// Another) of their own. Confirmed live: even after fixing the button's
+// own click-blocking overlay, a user who takes more than ~5s to click
+// Download gets the whole modal wiped out from under them by this timer
+// mid-interaction, with no way to recover the download. Wizard callers
+// pass true here and take over the reload themselves -- once the user
+// actually finishes (clicks Done), not on an arbitrary clock.
+//
+// Every other caller passes neither argument and is unaffected.
+function saveChanges(onComplete, deferReload)
 {
 	var errorList = proofreadAll();
 	if(errorList.length > 0)
@@ -373,12 +397,19 @@ function saveChanges()
 		{
 			if(req.readyState == 4)
 			{
-				setTimeout(function () {
-					//Give wireguard 5 seconds to come up.
-					//It is much quicker than this, but it helps the status flow
-					//through to the user in a more expected way if we wait
-					window.location=window.location;
-				}, 5000);		
+				if(typeof onComplete == "function")
+				{
+					onComplete();
+				}
+				if(!deferReload)
+				{
+					setTimeout(function () {
+						//Give wireguard 5 seconds to come up.
+						//It is much quicker than this, but it helps the status flow
+						//through to the user in a more expected way if we wait
+						window.location=window.location;
+					}, 5000);
+				}
 			}
 		}
 		runAjax("POST", "utility/run_commands.sh", param, stateChangeFunction);
@@ -1436,22 +1467,39 @@ function wizardCommitClient()
 		// that runs, uci has the new client (addAc() writes it directly) but not
 		// the server, so a config built here first would come out with server ip
 		// and keys blank. saveChanges() sets uci synchronously before kicking off
-		// its own async persist, so uci is fully populated the moment it returns
-		// and step 3 can build from it immediately without waiting on that
-		// request. This also means the config shown is genuinely what's being
-		// saved, not a snapshot that could differ from it.
-		saveChanges();
-		wizardShowStep3();
+		// its own async persist, so the LOCAL uci (what the config is built
+		// from) is already correct the moment saveChanges() returns -- but the
+		// backend commit is still in flight at that point. wizardShowStep3() is
+		// passed as saveChanges()'s completion callback rather than called
+		// right after it, so the Download button only appears (and only
+		// becomes clickable -- see wizardShowStep3()'s own comment) once that
+		// commit has actually landed, not while it's still racing the
+		// download's own separate backend request.
+		saveChanges(wizardShowStep3, true);
 	}
 }
 
 function wizardShowStep3()
 {
+	// saveChanges() (just called by wizardCommitClient()) leaves the
+	// setControlsEnabled(false) wait overlay up on purpose for a plain Save
+	// button -- it's cleared five seconds later by that same save's own
+	// unconditional page reload, not by saveChanges() itself. That's fine
+	// when nothing else is on screen, but this step renders a real,
+	// actionable Download button UNDER that overlay: confirmed live that it
+	// blocks every click for the entire five-second window, and the reload
+	// then destroys the modal before a user ever gets a working click in.
+	// saveChanges() already wrote the new client+server state into the local
+	// uci synchronously before returning (wizardDownloadConfig()'s own
+	// comment relies on exactly this), so the overlay's job is done as far
+	// as this wizard is concerned -- clear it explicitly rather than wait on
+	// a reload that arrives too late.
+	setControlsEnabled(true);
 	showWizardPanel("step3");
 	modalPrepare('wireguard_wizard_modal', wgStr.wgWizTitle, [],
 		[
 			{"title" : wgStr.wgWizDone, "classes" : "btn btn-primary",
-				"function" : function(){ closeModalWindow('wireguard_wizard_modal'); }},
+				"function" : function(){ closeModalWindow('wireguard_wizard_modal'); window.location=window.location; }},
 		]);
 	openModalWindow('wireguard_wizard_modal');
 }
@@ -1632,20 +1680,31 @@ function guestPartyCommitClient()
 		// written inside saveChanges()'s own configureFirewall() closure, and
 		// downloadAc()'s AllowedIPs depends on the LAN/subnet math being
 		// correct regardless -- same reasoning as the Remote Access wizard's
-		// own saveChanges()-before-build ordering.
-		saveChanges();
-		guestPartyShowDone();
+		// own saveChanges()-before-build ordering. guestPartyShowDone() is
+		// passed as the completion callback (not called right after) for the
+		// same reason wizardShowStep3() is: showing its Download button before
+		// the backend commit actually lands can race that button's own click
+		// against saveChanges()'s still-in-flight persist.
+		saveChanges(guestPartyShowDone, true);
 	}
 }
 
 function guestPartyShowDone()
 {
+	// Same fix as wizardShowStep3(): saveChanges() (just called by
+	// guestPartyCommitClient()) leaves the wait overlay up until its own
+	// five-second-later reload, but this panel renders real Download/Add
+	// Another buttons under it -- confirmed live (see wizardShowStep3's own
+	// comment) that the overlay blocks every click for that whole window.
+	// The local uci is already fully updated by this point, so it's safe to
+	// clear the overlay here rather than let a too-late reload do it.
+	setControlsEnabled(true);
 	document.getElementById("wireguard_guest_party_done_message").innerText = wgStr.GPDone;
 	guestPartyShowPanel("done");
 	modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
 		[
 			{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
-				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); }},
+				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); window.location=window.location; }},
 		]);
 	openModalWindow('wireguard_guest_party_modal');
 }
@@ -1685,13 +1744,21 @@ function guestPartyEnd()
 	uci.remove("wireguard_gargoyle", "server", "party_saved_c2c");
 
 	closeModalWindow('wireguard_guest_party_modal');
-	saveChanges();
-
-	guestPartyShowPanel("ended");
-	modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
-		[
-			{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
-				"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); }},
-		]);
-	openModalWindow('wireguard_guest_party_modal');
+	// Same reasoning as wizardCommitClient()/guestPartyCommitClient(): don't
+	// tell the user isolation is restored until the backend commit that
+	// actually restores it has landed, not just been kicked off.
+	saveChanges(function()
+	{
+		// Same as wizardShowStep3()/guestPartyShowDone(): clear the wait
+		// overlay ourselves now that the backend commit has landed, rather
+		// than leave it blocking this panel's own Done button.
+		setControlsEnabled(true);
+		guestPartyShowPanel("ended");
+		modalPrepare('wireguard_guest_party_modal', wgStr.GPTitle, [],
+			[
+				{"title" : wgStr.GPDone2, "classes" : "btn btn-primary",
+					"function" : function(){ closeModalWindow('wireguard_guest_party_modal'); window.location=window.location; }},
+			]);
+		openModalWindow('wireguard_guest_party_modal');
+	}, true);
 }
