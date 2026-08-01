@@ -13,11 +13,32 @@
 #       option name    'Johns-Laptop'
 #       option mac     'AA:BB:CC:DD:EE:FF'
 #       option ip      '192.168.1.100'   # optional static IP
-#       option group   'family'          # optional group membership
+#       list group     'family'          # 0+ group memberships (a plain
+#       list group     'streaming'       # `option group` scalar -- the
+#                                         # pre-multi-group shape -- still
+#                                         # reads back fine: `uci show`
+#                                         # renders a single-value list
+#                                         # identically to a scalar option,
+#                                         # one line either way, so no
+#                                         # migration is needed for old
+#                                         # devices with exactly one group.
 #
-# Groups are identified purely by their name string — there is no separate
-# 'config group' section.  All unique group values across all host sections
-# are the set of defined groups.
+#   config group 'group_1'
+#       option name    'family'
+#
+# A group's name string is the identity that ties everything together
+# (host.group values, restriction/quota/QoS rules' GROUP:<name> targets, and
+# nftables set naming below) -- 'config group' sections do not change that,
+# they only let a group be DECLARED independent of any device carrying it.
+# The full set of defined groups is therefore the union of every unique
+# host.group value AND every declared group's option name (get_all_groups
+# below) -- a name present in both counts once. A group with no declaration
+# still works exactly as before: it exists only as long as >=1 host section
+# carries it, and vanishes the moment the last one stops (unchanged,
+# pre-existing behaviour). A group WITH a declaration persists at zero
+# devices instead -- see docs/standalone-device-groups-plan.md for why this
+# was added and why it's safe (manage_groups.sh already creates a group's
+# nftables set before any rule can reference it, regardless of device count).
 #
 # nftables set naming:
 #   Group names are sanitized to lowercase, with any character outside
@@ -49,42 +70,81 @@ get_device_field()
 	uci get "dhcp.$1.$2" 2>/dev/null
 }
 
-# get_device_group <section>
-# Returns the group name for a host section, or empty string if unset.
-get_device_group()
+# get_device_groups <section>
+# Prints every group name a host section belongs to (0, 1, or many --
+# one per line). Reads via `uci show` rather than `uci get`. Verified
+# against the real router (not assumed): a `list` option with multiple
+# values renders as ONE "key='A' 'B'" line, space-separated with each
+# value individually quoted -- NOT one line per value. Since group names
+# are charset-restricted to [a-zA-Z0-9_-] (no spaces, no quotes -- see the
+# dev_new_group validation in dhcp.js), stripping quotes and splitting on
+# the remaining spaces is a safe, portable parse (no GNU-sed-specific
+# escapes needed). A legacy single-value `option group 'family'` line
+# already has no interior spaces, so it passes through unsplit -- one
+# consistent pipeline for both shapes.
+get_device_groups()
 {
-	get_device_field "$1" "group"
+	uci show dhcp 2>/dev/null | grep "^dhcp\.$1\.group=" | sed "s/^[^=]*=//; s/'//g" | tr ' ' '\n'
 }
 
-# set_device_group <section> <group_name>
-# Assigns a host section to a group.  Pass empty string to remove.
-set_device_group()
+# get_all_declared_group_sections
+# Prints UCI section names for every 'group' section in /etc/config/dhcp.
+get_all_declared_group_sections()
 {
-	local section="$1"
-	local group="$2"
-	if [ -z "$group" ]
-	then
-		uci del "dhcp.$section.group" 2>/dev/null
-	else
-		uci set "dhcp.$section.group=$group"
-	fi
+	uci show dhcp 2>/dev/null | grep '=group$' | sed 's/dhcp\.\(.*\)=group/\1/'
+}
+
+# find_declared_group_section <group_name>
+# Prints the UCI section name of the 'group' section whose option name
+# exactly matches (case-sensitive, matching every other group-name
+# comparison in this codebase), or nothing + failure if none declares it.
+find_declared_group_section()
+{
+	local target="$1"
+	local gsections
+	gsections=$(get_all_declared_group_sections)
+	local gsection
+	for gsection in $gsections
+	do
+		if [ "$(get_device_field "$gsection" "name")" = "$target" ]
+		then
+			echo "$gsection"
+			return 0
+		fi
+	done
+	return 1
 }
 
 # get_all_groups
-# Prints each unique group name (one per line) found across all host sections.
+# Prints each unique group name (one per line): every host section's group
+# value, unioned with every declared group's name, so a zero-device
+# declared group still appears and a name present in both counts once.
 get_all_groups()
 {
-	local sections
-	sections=$(get_all_known_device_sections)
-	local section
-	for section in $sections
-	do
-		get_device_group "$section"
-	done | sort -u | grep -v '^$'
+	{
+		local sections
+		sections=$(get_all_known_device_sections)
+		local section
+		for section in $sections
+		do
+			get_device_groups "$section"
+		done
+
+		local gsections
+		gsections=$(get_all_declared_group_sections)
+		local gsection
+		for gsection in $gsections
+		do
+			get_device_field "$gsection" "name"
+		done
+	} | sort -u | grep -v '^$'
 }
 
 # get_sections_in_group <group_name>
-# Prints the UCI section names of every host that belongs to the given group.
+# Prints the UCI section names of every host that belongs to the given
+# group -- a host with several groups matches every one of them, not just
+# a single "the" group, so it's counted (and its IP seeded into the
+# nftables set) for each.
 get_sections_in_group()
 {
 	local target_group="$1"
@@ -93,9 +153,7 @@ get_sections_in_group()
 	local section
 	for section in $sections
 	do
-		local grp
-		grp=$(get_device_group "$section")
-		if [ "$grp" = "$target_group" ]
+		if get_device_groups "$section" | grep -qxF "$target_group"
 		then
 			echo "$section"
 		fi
