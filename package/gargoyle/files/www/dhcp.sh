@@ -49,7 +49,8 @@
 	ip -6 neigh | grep -v "FAILED" | grep -v "^fe80:" | awk '{print "ip6neighData[\""$1"\"] = \""$5"\";"};'
 
 	echo "var knownDeviceGroups = [];"
-	uci show dhcp 2>/dev/null | grep '^dhcp\.[^.]*\.group=' | sed "s/^[^=]*=//; s/'//g" | sort -u | grep -v '^$' | while read grp ; do
+	. /usr/lib/gargoyle/known_devices.sh
+	get_all_groups | while read grp ; do
 		escaped=$(printf '%s' "$grp" | sed 's/\\/\\\\/g; s/"/\\"/g')
 		printf 'knownDeviceGroups.push("%s");\n' "$escaped"
 	done
@@ -252,6 +253,24 @@ ipHostHash["::1"] = "localhost6";
 	</div>
 </div>
 
+<div class="row">
+	<div class="col-lg-12">
+		<div class="panel panel-default">
+			<div class="panel-heading">
+				<h3 class="panel-title"><%~ dhcp.Grps %></h3>
+			</div>
+			<div class="panel-body">
+				<div class="row form-group">
+					<span class="col-xs-12"><button id="add_group_button" class="btn btn-default btn-add" onclick="addGroupModal()"><%~ dhcp.AdGrp %></button></span>
+				</div>
+				<div class="row form-group">
+					<div id="groups_table_container" class="table-responsive col-xs-12"></div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
 <div id="firefox3_bug_correct" style="display:none">
 	<input type="text" value="firefox3_bug" />
 </div>
@@ -271,6 +290,24 @@ ipHostHash["::1"] = "localhost6";
 				<%in templates/device_template %>
 			</div>
 			<div class="modal-footer" id="device_modal_button_container">
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="modal fade" tabindex="-1" role="dialog" id="group_modal" aria-hidden="true" aria-labelledby="group_modal_title">
+	<div class="modal-dialog" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3 id="group_modal_title" class="panel-title"></h3>
+			</div>
+			<div class="modal-body">
+				<div class="row form-group">
+					<label class="col-xs-4" for="group_name" id="group_name_label"><%~ dhcp.GrpNm %>:</label>
+					<span class="col-xs-8"><input type="text" class="form-control" id="group_name" /></span>
+				</div>
+			</div>
+			<div class="modal-footer" id="group_modal_button_container">
 			</div>
 		</div>
 	</div>

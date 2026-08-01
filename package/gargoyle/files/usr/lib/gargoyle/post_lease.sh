@@ -32,21 +32,23 @@ ip="$3"
 [ "$ip" = "*" ] && exit 0
 [ "$event" != "add" ] && [ "$event" != "del" ] && [ "$event" != "old" ] && exit 0
 
-# Find which group this MAC belongs to by scanning UCI host sections
+# Find which section this MAC belongs to, then update EVERY group it's a
+# member of (a device can belong to more than one) -- each is an
+# independent nftables set, so its IP needs adding to/removing from all of
+# them, not just the first.
 for section in $(get_all_known_device_sections); do
 	stored_mac=$(get_device_field "$section" "mac" | tr 'a-z' 'A-Z')
 	[ "$stored_mac" != "$mac" ] && continue
 
-	group=$(get_device_group "$section")
-	[ -z "$group" ] && exit 0
+	for group in $(get_device_groups "$section"); do
+		setname=$(group_to_set_name "$group")
 
-	setname=$(group_to_set_name "$group")
-
-	if [ "$event" = "add" ] || [ "$event" = "old" ]; then
-		nft add element "$NFT_FAMILY" "$NFT_TABLE" "$setname" \{ "$ip" \} 2>/dev/null
-	else
-		nft delete element "$NFT_FAMILY" "$NFT_TABLE" "$setname" \{ "$ip" \} 2>/dev/null
-	fi
+		if [ "$event" = "add" ] || [ "$event" = "old" ]; then
+			nft add element "$NFT_FAMILY" "$NFT_TABLE" "$setname" \{ "$ip" \} 2>/dev/null
+		else
+			nft delete element "$NFT_FAMILY" "$NFT_TABLE" "$setname" \{ "$ip" \} 2>/dev/null
+		fi
+	done
 
 	exit 0
 done

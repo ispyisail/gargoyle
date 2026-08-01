@@ -41,6 +41,16 @@ dhcpS.ShowAdv="Show advanced (IPv6 reservation)";
 dhcpS.HideAdv="Hide advanced (IPv6 reservation)";
 
 dhcpS.grpErr="Group name may only contain letters, numbers, hyphen and underscore (no spaces).";
+dhcpS.AddNewGrp="Or add a new group:";
+
+dhcpS.Grps="Device Groups";
+dhcpS.AdGrp="Add Group";
+dhcpS.EGrp="Edit Group";
+dhcpS.GrpEmptyErr="Enter a group name.";
+dhcpS.dGrpErr="A group with that name already exists.";
+dhcpS.RmGrpConfirmPfx="Remove group";
+dhcpS.RmGrpConfirmMid="? This clears it from";
+dhcpS.RmGrpConfirmSfx="device(s) below. The devices themselves will not be deleted.";
 
 dhcpS.UseAltGW="Use alternative default Gateway address";
 dhcpS.AltGW="Gateway IP address";

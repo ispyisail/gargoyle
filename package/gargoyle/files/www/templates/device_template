@@ -11,9 +11,11 @@
 				<span class="col-xs-7"><input type="text" id="dev_ip" oninput="proofreadIp(this)" maxlength="15" class="form-control" /></span>
 			</div>
 			<div class="row form-group">
-				<label class="col-xs-5" id="dev_group_label" for="dev_group"><%~ dhcp.GrpNm %> <em>(<%~ dhcp.opt %>)</em></label>
+				<label class="col-xs-5" id="dev_groups_label"><%~ dhcp.GrpNm %> <em>(<%~ dhcp.opt %>)</em></label>
 				<span class="col-xs-7">
-					<input type="text" id="dev_group" list="dev_group_list" class="form-control" autocomplete="off" placeholder="e.g. family, iot, work, kids" />
+					<div id="dev_groups_checklist"></div>
+					<label id="dev_new_group_label" for="dev_new_group"><%~ dhcp.AddNewGrp %></label>
+					<input type="text" id="dev_new_group" list="dev_group_list" class="form-control" autocomplete="off" placeholder="e.g. family, iot, work, kids" />
 					<datalist id="dev_group_list"></datalist>
 				</span>
 			</div>

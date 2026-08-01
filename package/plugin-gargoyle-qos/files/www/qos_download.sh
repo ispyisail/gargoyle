@@ -24,7 +24,8 @@
 	fi
 
 	echo "var knownDeviceGroups = [];"
-	uci show dhcp 2>/dev/null | grep '^dhcp\.[^.]*\.group=' | sed "s/^[^=]*=//; s/'//g" | sort -u | grep -v '^$' | while read grp ; do
+	. /usr/lib/gargoyle/known_devices.sh
+	get_all_groups | while read grp ; do
 		escaped=$(printf '%s' "$grp" | sed 's/\\/\\\\/g; s/"/\\"/g')
 		printf 'knownDeviceGroups.push("%s");\n' "$escaped"
 	done
