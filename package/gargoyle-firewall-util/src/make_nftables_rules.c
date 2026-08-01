@@ -192,7 +192,32 @@ char** compute_rules(string_map *rule_def, char* table, char* chain, int is_ingr
 	char* active_weekly_ranges  = get_map_element(rule_def, "active_weekly_ranges");
 	if(active_weekly_ranges != NULL)
 	{
-		char* tmp = dynamic_strcat(3, " timerange weekly-ranges \\\"", active_weekly_ranges, "\\\" " );
+		/* nft's own CLI misreads a standalone, space-surrounded '-' token as
+		 * an attempted option flag ("syntax error, options must be specified
+		 * before commands") -- confirmed live against nft 1.1.6. The value's
+		 * canonical display format ("Day HH:MM - Day HH:MM", spaces around
+		 * the hyphen) is what weekly_i18n() in restrictions.js needs to
+		 * correctly localize day names, so fix the spacing here rather than
+		 * changing that format -- only the copy embedded into the nft
+		 * command line needs it collapsed. Also fixes a second, independent
+		 * bug: the nft timerange extension's own keyword is "weeklyranges"
+		 * (one word), not "weekly-ranges" -- verified against
+		 * netfilter-match-modules/nftables/timerange/libnftnl/src_expr_timerange.c. */
+		char* sanitized = strdup(active_weekly_ranges);
+		while(strstr(sanitized, " -") != NULL)
+		{
+			char* old_str = sanitized;
+			sanitized = dynamic_replace(sanitized, " -", "-");
+			free(old_str);
+		}
+		while(strstr(sanitized, "- ") != NULL)
+		{
+			char* old_str = sanitized;
+			sanitized = dynamic_replace(sanitized, "- ", "-");
+			free(old_str);
+		}
+		char* tmp = dynamic_strcat(3, " timerange weeklyranges \\\"", sanitized, "\\\" " );
+		free(sanitized);
 		dcat_and_free(&single_check, &tmp, 1, 1);
 	}
 	else if(active_hours != NULL && active_weekdays != NULL)
