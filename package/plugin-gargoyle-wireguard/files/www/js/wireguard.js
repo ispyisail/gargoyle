@@ -888,6 +888,78 @@ function setAllowedClientVisibility()
 	{
 		document.getElementById("wireguard_allowed_client_pubkey").removeAttribute("readonly");
 	}
+
+	// Re-evaluate here, not just from the fields' own oninput. This runs on
+	// every modal open, and the populate path sets .value programmatically --
+	// which does NOT fire oninput. Without this, a warning raised for one
+	// client stays on screen when the next client's modal is opened over it.
+	checkWgClientSubnetOverlap();
+}
+
+// Backstop for the lockout in forum thread 18405: a routed "subnet behind
+// client" that overlaps the router's own LAN or the WireGuard server subnet
+// sends that traffic into the tunnel instead of locally. Two subnets overlap
+// when their network addresses match under the less-specific (shorter) of the
+// two masks.
+//
+// Shared by validateAc()'s save-time refusal and checkWgClientSubnetOverlap()'s
+// live warning so the two can never disagree about what counts as an overlap,
+// or about the wording shown for it.
+function wgSubnetOverlapErrors(subnetIp, subnetMask, internalServerIp, internalServerMask)
+{
+	var errors = []
+	var subNet  = parseIp(subnetIp)
+	var subMask = parseMask(subnetMask)
+	var subnetsOverlap = function(net1, mask1, net2, mask2)
+	{
+		var common = mask1 & mask2
+		return (net1 & common) == (net2 & common)
+	}
+	if( typeof currentLanIp != "undefined" && typeof currentLanMask != "undefined" )
+	{
+		var lanMask = parseMask(currentLanMask)
+		if( subnetsOverlap(subNet, subMask, parseIp(currentLanIp) & lanMask, lanMask) )
+		{
+			errors.push(wgStr.SubOvLan)
+		}
+	}
+	var wgSrvMask = parseMask(internalServerMask)
+	if( subnetsOverlap(subNet, subMask, parseIp(internalServerIp) & wgSrvMask, wgSrvMask) )
+	{
+		errors.push(wgStr.SubOvWg)
+	}
+	return errors
+}
+
+// Warn as soon as the admin types an overlapping subnet, instead of only
+// refusing once they hit save. The save-time check in validateAc() stays
+// exactly as it was -- this is an earlier signal, not a replacement.
+function checkWgClientSubnetOverlap()
+{
+	var warn = document.getElementById("wireguard_allowed_client_subnet_warn")
+	if(warn == null) { return }
+
+	var prefix = "wireguard_allowed_client_"
+	var container = document.getElementById(prefix + "subnet_ip_container")
+	var ipEl   = document.getElementById(prefix + "subnet_ip")
+	var maskEl = document.getElementById(prefix + "subnet_mask")
+
+	var errors = []
+	// Only meaningful while the routed-subnet section is on screen and both
+	// fields hold something parseable -- otherwise a half-typed address would
+	// flash a warning on every keystroke.
+	if( container != null && container.style.display != "none" && ipEl != null && maskEl != null &&
+	    ipEl.value.match(/^\d+\.\d+\.\d+\.\d+$/) && maskEl.value.match(/^\d+\.\d+\.\d+\.\d+$/) )
+	{
+		errors = wgSubnetOverlapErrors(ipEl.value, maskEl.value,
+			document.getElementById("wireguard_server_ip").value,
+			document.getElementById("wireguard_server_mask").value)
+	}
+
+	// textContent, not innerHTML: these are translated sentences, and there is
+	// no reason to let a translation file inject markup.
+	warn.textContent = errors.length > 0 ? errors[0] : ""
+	warn.style.display = errors.length > 0 ? "" : "none"
 }
 
 function validateAc(internalServerIp, internalServerMask)
@@ -927,31 +999,10 @@ function validateAc(internalServerIp, internalServerMask)
 		var subnetMaskEl = document.getElementById(prefix + "subnet_mask")
 		subnetIpEl.value = applyMask(subnetIpEl.value, subnetMaskEl.value)
 
-		// Backstop for the lockout in forum thread 18405: a routed "subnet
-		// behind client" that overlaps the router's own LAN or the WireGuard
-		// server subnet sends that traffic into the tunnel instead of locally.
-		// Two subnets overlap when their network addresses match under the
-		// less-specific (shorter) of the two masks. Refuse the save rather
-		// than let the admin route their own management network away.
-		var subNet  = parseIp(subnetIpEl.value)
-		var subMask = parseMask(subnetMaskEl.value)
-		var subnetsOverlap = function(net1, mask1, net2, mask2)
+		var overlapErrors = wgSubnetOverlapErrors(subnetIpEl.value, subnetMaskEl.value, internalServerIp, internalServerMask)
+		for(var oi = 0; oi < overlapErrors.length; oi++)
 		{
-			var common = mask1 & mask2
-			return (net1 & common) == (net2 & common)
-		}
-		if( typeof currentLanIp != "undefined" && typeof currentLanMask != "undefined" )
-		{
-			var lanMask = parseMask(currentLanMask)
-			if( subnetsOverlap(subNet, subMask, parseIp(currentLanIp) & lanMask, lanMask) )
-			{
-				errors.push(wgStr.SubOvLan)
-			}
-		}
-		var wgSrvMask = parseMask(internalServerMask)
-		if( subnetsOverlap(subNet, subMask, parseIp(internalServerIp) & wgSrvMask, wgSrvMask) )
-		{
-			errors.push(wgStr.SubOvWg)
+			errors.push(overlapErrors[oi])
 		}
 	}
 	if(errors.length == 0 && document.getElementById(prefix + "subnet_ip6_container").style.display != "none")
