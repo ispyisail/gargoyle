@@ -16,7 +16,14 @@ insert_lines_at()
 	remainder=$(($file_length - $insert_after))
 		
 	head -n $insert_after $file >.tmp.tmp
-	printf "$lines\n" >>.tmp.tmp
+	# printf '%s\n' -- NOT printf "$lines\n". Using the snippet as the
+	# FORMAT string makes the inserted code depend on the shell's printf:
+	# it eats %% and, worse, drops the backslash in \" on implementations
+	# where that escape is undefined (bash, coreutils printf), turning
+	# "%s\"%s\"" into "%s"%s"" and breaking the build with 's' undeclared.
+	# dash and busybox ash happen to preserve it, which is why this only
+	# broke for people whose /bin/sh is bash.
+	printf '%s\n' "$lines" >>.tmp.tmp
 	if [ $remainder -gt 0 ] ; then
 		tail -n $remainder $file >>.tmp.tmp
 	fi
