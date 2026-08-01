@@ -6,7 +6,7 @@
 	# itself remain covered by the GPL.
 	# See http://gargoyle-router.com/faq.html#qfoss for more information
 	eval $( gargoyle_session_validator -c "$COOKIE_hash" -e "$COOKIE_exp" -a "$HTTP_USER_AGENT" -i "$REMOTE_ADDR" -r "login.sh" -t $(uci get gargoyle.global.session_timeout) -b "$COOKIE_browser_time"  )
-	gargoyle_header_footer -h -s "firewall" -p "restriction" -j "table.js restrictions.js" -z "restrictions.js" gargoyle firewall
+	gargoyle_header_footer -h -s "firewall" -p "restriction" -j "table.js restrictions.js" -z "restrictions.js" gargoyle firewall dhcp
 
 %>
 
@@ -18,6 +18,15 @@
 		escaped=$(printf '%s' "$grp" | sed 's/\\/\\\\/g; s/"/\\"/g')
 		printf 'knownDeviceGroups.push("%s");\n' "$escaped"
 	done
+
+	# Currently-connected devices that may not have a dhcp.host section yet --
+	# same source dhcp.sh reads, needed so the Family Time wizard's inline
+	# "no groups yet" step can offer something to pick even on a router where
+	# no device has ever been promoted to a named/grouped host entry.
+	echo "var leaseData = new Array();";
+	if [ -e /tmp/dhcp.leases ] ; then
+		awk ' $0 ~ /[a-z,A-Z,0-9]+/ {print "leaseData.push([\""$2"\",\""$3"\",\""$4"\"]);"};' /tmp/dhcp.leases
+	fi
 	# Same tz-offset export basic.sh already does for its own page -- lets
 	# a timed-disable's "Disabled until HH:MM" render in the ROUTER's local
 	# time, not the admin's browser, consistent with how every other
@@ -104,8 +113,20 @@
 				<h3 id="family_time_wizard_modal_title" class="panel-title"><%~ restrictions.FTWTitle %></h3>
 			</div>
 			<div class="modal-body">
-				<div id="family_time_wizard_noGroups" style="display:none">
-					<p><%~ restrictions.FTWNoGroups %></p>
+				<div id="family_time_wizard_noDevices" style="display:none">
+					<p><%~ restrictions.FTWNoDevices %></p>
+				</div>
+
+				<div id="family_time_wizard_createGroup" style="display:none">
+					<p><%~ restrictions.FTWCreateGroupDesc %></p>
+					<div class="row form-group">
+						<label class="col-xs-4" for="family_time_wizard_device"><%~ restrictions.FTWDeviceLabel %>:</label>
+						<span class="col-xs-8"><select id="family_time_wizard_device" class="form-control"></select></span>
+					</div>
+					<div class="row form-group">
+						<label class="col-xs-4" for="family_time_wizard_group_name"><%~ restrictions.FTWGroupNameLabel %>:</label>
+						<span class="col-xs-8"><input type="text" class="form-control" id="family_time_wizard_group_name" placeholder="kids" /></span>
+					</div>
 				</div>
 
 				<div id="family_time_wizard_step1" style="display:none">
@@ -115,12 +136,20 @@
 
 				<div id="family_time_wizard_step2" style="display:none">
 					<p><%~ restrictions.FTWStep2Desc %></p>
+					<p><em><%~ restrictions.FTWTimeFormatHint %></em></p>
 					<div class="row form-group">
 						<label class="col-xs-3" for='family_time_wizard_from'><%~ restrictions.FTWFrom %>:</label>
-						<span class="col-xs-3"><input type='text' class="form-control" id='family_time_wizard_from' size='6' placeholder='21:00' /></span>
-						<label class="col-xs-3" for='family_time_wizard_to'><%~ restrictions.FTWTo %>:</label>
-						<span class="col-xs-3"><input type='text' class="form-control" id='family_time_wizard_to' size='6' placeholder='07:00' /></span>
+						<span class="col-xs-4">
+							<input type='text' class="form-control" id='family_time_wizard_from' size='6' placeholder='21:00' oninput="updateFamilyTimeWizardAmPmPreview('family_time_wizard_from','family_time_wizard_from_ampm')" />
+							<span id="family_time_wizard_from_ampm" class="text-muted small"></span>
+						</span>
+						<label class="col-xs-2" for='family_time_wizard_to'><%~ restrictions.FTWTo %>:</label>
+						<span class="col-xs-3">
+							<input type='text' class="form-control" id='family_time_wizard_to' size='6' placeholder='07:00' oninput="updateFamilyTimeWizardAmPmPreview('family_time_wizard_to','family_time_wizard_to_ampm')" />
+							<span id="family_time_wizard_to_ampm" class="text-muted small"></span>
+						</span>
 					</div>
+					<p><em><%~ restrictions.FTWTimezoneHint %></em></p>
 					<div class="row form-group">
 						<label class="col-xs-5"><%~ restrictions.FTWDays %>:</label>
 						<span class="col-xs-7">

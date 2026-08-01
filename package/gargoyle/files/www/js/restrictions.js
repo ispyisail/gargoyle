@@ -120,7 +120,13 @@ function saveChanges()
 	// restart_firewall.sh reads the config, or it'd still be sitting
 	// uncommitted when the regen happens.
 	var runCommandsStr = runCommands.length > 0 ? runCommands.join("\n") + "\nuci commit" : "";
-	var commands = deleteSectionCommands.join("\n") + "\n" + createSectionCommands.join("\n") + "\n" + uci.getScriptCommands(uciOriginal) + "\n" + runCommandsStr + "\n" + "sh /usr/lib/gargoyle/restart_firewall.sh";
+	// manage_groups.sh only needs to run when the wizard's inline "no groups
+	// yet" step actually wrote a new dhcp.host/group -- it (re)creates and
+	// seeds the group's nftables set from current UCI + /tmp/dhcp.leases, so
+	// the rule this save also creates has somewhere to actually match against
+	// immediately, rather than sitting inert until the next boot/ifup.
+	var manageGroupsCommand = familyTimeWizardCreatedGroup ? "\n/usr/lib/gargoyle/manage_groups.sh" : "";
+	var commands = deleteSectionCommands.join("\n") + "\n" + createSectionCommands.join("\n") + "\n" + uci.getScriptCommands(uciOriginal) + "\n" + runCommandsStr + "\n" + "sh /usr/lib/gargoyle/restart_firewall.sh" + manageGroupsCommand;
 
 	var param = getParameterDefinition("commands", commands) +  "&" + getParameterDefinition("hash", document.cookie.replace(/^.*hash=/,"").replace(/[\t ;]+.*$/, ""));
 	var stateChangeFunction = function(req)
@@ -128,6 +134,7 @@ function saveChanges()
 		if(req.readyState == 4)
 		{
 			uciOriginal = uci.clone();
+			familyTimeWizardCreatedGroup = false;
 			resetData();
 			setControlsEnabled(true);
 			//alert(req.responseText);
@@ -1287,13 +1294,27 @@ function editRestrictionModal(isRestriction, triggerEl)
 // table -- no separate wizard step needed for it.
 
 var familyTimeWizardSelectedGroups = [];
+// Set when the "no groups yet" path writes a new dhcp.host/group -- saveChanges()
+// needs to know to run manage_groups.sh so the new nftables set actually gets
+// created+seeded immediately, rather than waiting for the next boot/ifup.
+var familyTimeWizardCreatedGroup = false;
 
 function openFamilyTimeWizard()
 {
 	if(knownDeviceGroups.length === 0)
 	{
-		showFamilyTimeWizardPanel("noGroups");
-		modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [], ["defaultDismiss"]);
+		if(!familyTimeWizardPrepareCreateGroupPanel())
+		{
+			showFamilyTimeWizardPanel("noDevices");
+			modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [], ["defaultDismiss"]);
+			openModalWindow('family_time_wizard_modal');
+			return;
+		}
+		modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [],
+			[
+				{"title" : restStr.FTWNext, "classes" : "btn btn-primary", "function" : familyTimeWizardCreateGroup},
+				"defaultDismiss"
+			]);
 		openModalWindow('family_time_wizard_modal');
 		return;
 	}
@@ -1327,10 +1348,113 @@ function openFamilyTimeWizard()
 
 function showFamilyTimeWizardPanel(name)
 {
-	["noGroups", "step1", "step2", "done"].forEach(function(panel)
+	["noDevices", "createGroup", "step1", "step2", "done"].forEach(function(panel)
 	{
 		document.getElementById("family_time_wizard_" + panel).style.display = panel == name ? "block" : "none";
 	});
+}
+
+// Builds the device dropdown for the inline "no groups yet" step: known
+// devices (dhcp.host sections, whatever group -- or lack of one -- they
+// currently have) plus any currently-connected lease that isn't a known
+// device yet, tagged "(new)". Returns false when neither source has
+// anything to offer, so the caller falls back to pointing the admin at the
+// real Devices page instead of a dead end.
+function familyTimeWizardPrepareCreateGroupPanel()
+{
+	var values = [];
+	var names = [];
+	var usedMacs = {};
+
+	var hostSections = uciOriginal.getAllSectionsOfType("dhcp", "host");
+	var hi;
+	for(hi = 0; hi < hostSections.length; hi++)
+	{
+		var hs = hostSections[hi];
+		var mac = uciOriginal.get("dhcp", hs, "mac");
+		if(mac == "") { continue; }
+		usedMacs[mac.toUpperCase()] = true;
+		var name = uciOriginal.get("dhcp", hs, "name");
+		values.push("host," + hs);
+		names.push((name == "" ? mac : name) + " (" + mac + ")");
+	}
+
+	var li;
+	for(li = 0; li < leaseData.length; li++)
+	{
+		var lease = leaseData[li];
+		var mac = lease[0].toUpperCase();
+		if(usedMacs[mac]) { continue; }
+		var hostname = lease[2];
+		values.push("lease," + mac + "," + hostname);
+		names.push((hostname == "" || hostname == "*" ? mac : hostname) + " (" + mac + ") " + restStr.FTWNewDeviceTag);
+	}
+
+	if(values.length === 0) { return false; }
+
+	showFamilyTimeWizardPanel("createGroup");
+	setAllowableSelections("family_time_wizard_device", values, names);
+	document.getElementById("family_time_wizard_group_name").value = "";
+	return true;
+}
+
+// Reuses dhcp.js's own group-name rule (letters/digits/hyphen/underscore
+// only -- spaces or other characters break the GROUP:<name> references used
+// by firewall/quota/restriction rules and the nftables set) and its
+// device_N host-section shape, without pulling in dhcp.js's DOM-coupled
+// devices-table code, which this modal doesn't have.
+function familyTimeWizardCreateGroup()
+{
+	var groupName = document.getElementById("family_time_wizard_group_name").value;
+	if(groupName == "" || groupName.match(/^[a-zA-Z0-9_-]+$/) == null)
+	{
+		alert(restStr.FTWBadGroupName);
+		return;
+	}
+
+	var picked = getSelectedValue("family_time_wizard_device");
+	if(picked == null || picked == "")
+	{
+		alert(restStr.FTWNoDeviceSelected);
+		return;
+	}
+
+	var parts = picked.split(",");
+	var cfgid;
+	if(parts[0] == "host")
+	{
+		cfgid = parts[1];
+	}
+	else
+	{
+		var mac = parts[1];
+		var hostname = parts.length > 2 ? parts[2] : "";
+		var newIndex = 1;
+		cfgid = "device_" + newIndex;
+		while(uci.get("dhcp", cfgid, "") != "")
+		{
+			newIndex++;
+			cfgid = "device_" + newIndex;
+		}
+		uci.set("dhcp", cfgid, "", "host");
+		uci.set("dhcp", cfgid, "mac", mac);
+		if(hostname != "" && hostname != "*")
+		{
+			uci.set("dhcp", cfgid, "name", hostname);
+		}
+	}
+
+	uci.set("dhcp", cfgid, "group", groupName);
+	familyTimeWizardCreatedGroup = true;
+	knownDeviceGroups.push(groupName);
+	familyTimeWizardSelectedGroups = [groupName];
+
+	showFamilyTimeWizardPanel("step2");
+	modalPrepare('family_time_wizard_modal', restStr.FTWTitle, [],
+		[
+			{"title" : restStr.FTWCreate, "classes" : "btn btn-primary", "function" : familyTimeWizardCreate},
+			"defaultDismiss"
+		]);
 }
 
 function familyTimeWizardStep1Next()
@@ -1359,17 +1483,54 @@ function familyTimeWizardValidTime(str)
 	return /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(str);
 }
 
-// Builds the active_hours value for a from/to pair, splitting into two
-// comma-joined ranges when the range crosses midnight (e.g. 21:00 to 07:00),
-// since a single HH:MM-HH:MM range can't express that within one calendar
-// day. validateHours (common.js) accepts either shape.
-function familyTimeWizardHoursRange(fromStr, toStr)
+// Live "(10:00 PM)" preview next to a From/To field as the admin types, so
+// a 24-hour entry like "22:00" is confirmed at a glance rather than left
+// ambiguous -- this wizard's fields are 24-hour-only (familyTimeWizardValidTime
+// above rejects anything else), and this was previously the only feedback
+// on that; a bad guess here silently schedules the wrong time of day.
+function updateFamilyTimeWizardAmPmPreview(fieldId, previewId)
 {
-	if(fromStr < toStr)
+	var val = document.getElementById(fieldId).value;
+	var previewEl = document.getElementById(previewId);
+	if(!previewEl) { return; }
+	if(!familyTimeWizardValidTime(val)) { previewEl.textContent = ""; return; }
+	var parts = val.split(":");
+	var hours = parseInt(parts[0], 10);
+	var ampm = hours >= 12 ? restStr.FTWPM : restStr.FTWAM;
+	var hours12 = hours % 12;
+	hours12 = hours12 == 0 ? 12 : hours12;
+	previewEl.textContent = "(" + hours12 + ":" + parts[1] + " " + ampm + ")";
+}
+
+// Builds active_weekly_ranges: one "Day HH:MM - Day HH:MM" piece per
+// selected day (comma-joined, matching the general Restrictions form's own
+// weekly-schedule field format exactly -- see weekly_i18n/validateWeeklyRange
+// in this file/common.js -- so a rule created here opens correctly if an
+// admin later inspects it there). Deliberately NOT the daily active_weekdays
+// + active_hours mechanism the wizard originally used: that pairs a
+// same-calendar-day hour range with an independent weekday check, so a
+// midnight-crossing window (e.g. 21:00-07:00) needs BOTH the start day and
+// the end day's weekday checked for the crossing to complete -- but doing
+// that also opens a second, unwanted partial block starting the end day's
+// own evening, since the kernel module (nft_timerange.c) re-evaluates
+// "is today's weekday checked AND is right-now in the hour ranges"
+// independently at every moment, with no concept of one session spanning
+// two calendar days. A weekly range has no such artifact: it's one
+// continuous span on a Sunday-to-Saturday clock (nft_timerange.c's
+// WEEKLY_RANGE match type), so "Tue 21:00 - Wed 07:00" is genuinely one
+// session with no side effect on Wednesday evening, and each checked day
+// gets its own independent, fully correct overnight window -- exactly the
+// "which nights do you want this" semantics a parent actually expects.
+function familyTimeWizardWeeklyRanges(fromStr, toStr, checkedDays)
+{
+	var dayCap = {sun:"Sun", mon:"Mon", tue:"Tue", wed:"Wed", thu:"Thu", fri:"Fri", sat:"Sat"};
+	var nextDay = {sun:"mon", mon:"tue", tue:"wed", wed:"thu", thu:"fri", fri:"sat", sat:"sun"};
+	var crossesMidnight = fromStr >= toStr;
+	return checkedDays.map(function(d)
 	{
-		return fromStr + "-" + toStr;
-	}
-	return fromStr + "-23:59,00:00-" + toStr;
+		var endDay = crossesMidnight ? nextDay[d] : d;
+		return dayCap[d] + " " + fromStr + " - " + dayCap[endDay] + " " + toStr;
+	}).join(", ");
 }
 
 function familyTimeWizardCreate()
@@ -1408,11 +1569,7 @@ function familyTimeWizardCreate()
 	// match per GROUP: token, so this is already the backend's own preferred
 	// shape, not a workaround.
 	uci.set(pkg, newId, "local_addr", familyTimeWizardSelectedGroups.map(function(g){ return "GROUP:" + g; }).join(","));
-	if(checkedDays.length < 7)
-	{
-		uci.set(pkg, newId, "active_weekdays", checkedDays.join(","));
-	}
-	uci.set(pkg, newId, "active_hours", familyTimeWizardHoursRange(fromStr, toStr));
+	uci.set(pkg, newId, "active_weekly_ranges", familyTimeWizardWeeklyRanges(fromStr, toStr, checkedDays));
 	// url_type, remote_port_type, local_port_type, transport_protocol,
 	// app_protocol_type are all deliberately left unset here: on this schema,
 	// unset reads back as "all" (see the all_access checkbox's own load-time
